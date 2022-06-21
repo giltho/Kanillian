@@ -1,5 +1,5 @@
 (dirs wisl GillianCore Gillian-Rely-Runner Gillian-JS Gillian-C
-  Gillian-Alcotest-Runner ppx_sat)
+  Gillian-Alcotest-Runner ppx_sat kanillian)
 
 (env
  (opt

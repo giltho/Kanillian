@@ -1,0 +1,3 @@
+(library
+ (name kanillian)
+ (libraries gillian))

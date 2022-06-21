@@ -15,7 +15,8 @@
       "esy-installer gillian.install",
       "esy-installer gillian-js.install",
       "esy-installer gillian-c.install",
-      "esy-installer wisl.install"
+      "esy-installer wisl.install",
+      "esy-installer kanillian.install"
     ],
     "release": {
       "bin": [
