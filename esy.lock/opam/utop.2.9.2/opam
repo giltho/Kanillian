@@ -32,9 +32,9 @@ build: [
 dev-repo: "git+https://github.com/ocaml-community/utop.git"
 url {
   src:
-    "https://github.com/ocaml-community/utop/releases/download/2.9.1/utop-2.9.1.tbz"
+    "https://github.com/ocaml-community/utop/releases/download/2.9.2/utop-2.9.2.tbz"
   checksum: [
-    "md5=470dd7d91f8624be5af2868c9616eabe"
-    "sha512=002fa809d4924419f51b81df968b653a111ae5992837792fcb867adf2e44c15d40fadccc9784ef61f21ea3233f9da74016433920bf909d808752b7f825f8cdb1"
+    "md5=abd1c592464ce5f31b17009954040d7c"
+    "sha512=db97275aa4bd7725a9eeec6d9155c239f3e48adf8d34b73f55caa2de32fde98862480db5e05dffc89e98efd12eb60e08d89ad34b9a92a8de0d37ccb32af07ddf"
   ]
 }
