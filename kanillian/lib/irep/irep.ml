@@ -1,5 +1,11 @@
 type t = { id : Id.t; sub : t list; named_sub : (Id.t * t) list }
 
+let lookup name irep = List.assoc name irep.named_sub
+
+module Infix = struct
+  let ( $ ) irep name = lookup name irep
+end
+
 let rec of_yojson json =
   let open Kutils.J in
   let id = Id.of_yojson (json $ "id") in

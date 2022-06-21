@@ -16,4 +16,5 @@ module J = struct
   let to_string = catch_type_error to_string
   let to_bool = catch_type_error to_bool
   let to_list = catch_type_error to_list
+  let to_assoc = catch_type_error to_assoc
 end

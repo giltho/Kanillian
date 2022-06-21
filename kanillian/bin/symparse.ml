@@ -3,5 +3,5 @@ let () =
   let json = Yojson.Safe.from_file filename in
   let tbl = Irep_lib.Symtab.of_yojson json in
   match tbl with
-  | Ok tbl -> Printf.printf "Success! There are %d symbols" (Hashtbl.length tbl)
+  | Ok tbl -> Kanillian.Irep_to_gil.compile tbl |> ignore
   | Error msg -> Fmt.failwith "Failed with: %s" msg

@@ -1,3 +1,4 @@
 (library
  (name kanillian)
- (libraries gillian yojson irep_lib kutils))
+ (libraries gillian yojson irep_lib kutils)
+ (flags :standard -open Irep_lib))
