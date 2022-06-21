@@ -1,5 +1,13 @@
 (executable
  (name kanillian)
  (public_name kanillian)
+ (modules kanillian)
  (libraries kanillian cgil_lib gillian)
+ (package kanillian))
+
+(executable
+ (name symparse)
+ (public_name symparse)
+ (modules symparse)
+ (libraries kanillian yojson)
  (package kanillian))
