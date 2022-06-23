@@ -132,6 +132,7 @@ and Type : sig
      | Unsignedbv of { width : int } *)
 
   val is_function : t -> bool
+  val as_int_type : t -> IntType.t
   val of_irep : machine:Machine_model.t -> Irep.t -> t
   val pp : Format.formatter -> t -> unit
 end
@@ -140,6 +141,7 @@ module Expr : sig
   type value = IntConstant of Z.t | BoolConstant of bool | Symbol of string
   and t = { value : value; type_ : Type.t; location : Location.t }
 
+  val as_symbol : t -> string
   val value_of_irep : machine:Machine_model.t -> type_:Type.t -> Irep.t -> value
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end

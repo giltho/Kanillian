@@ -5,6 +5,11 @@ type value = IntConstant of Z.t | BoolConstant of bool | Symbol of string
 
 and t = { value : value; type_ : Type.t; location : Location.t }
 
+let as_symbol e =
+  match e.value with
+  | Symbol s -> s
+  | _ -> failwith "Expected a symbol, got something else!"
+
 (** Lifting from Irep *)
 open Irep.Infix
 
@@ -33,7 +38,7 @@ let rec value_of_irep
   | Symbol, _ ->
       let name = irep $ Identifier |> Irep.as_just_string in
       Symbol name
-  | _ -> failwith "unhandled expr value"
+  | id, _ -> failwith ("unhandled expr value: " ^ Id.to_string id)
 
 and of_irep ~machine irep =
   let location = Location.sloc_in_irep irep in

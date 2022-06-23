@@ -52,3 +52,7 @@ and param_of_irep ~machine irep =
   Typedefs__.{ identifier; base_name; type_ }
 
 let type_in_irep ~machine irep = of_irep ~machine (irep $ Type)
+
+let as_int_type = function
+  | CInteger ty -> ty
+  | _ -> failwith "Not an integer type"

@@ -1,1 +1,1 @@
-let machine_model = ref 0
+let machine_model = ref Machine_model.archi64
