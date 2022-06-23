@@ -18,3 +18,17 @@ module J = struct
   let to_list = catch_type_error to_list
   let to_assoc = catch_type_error to_assoc
 end
+
+let z_of_hex s =
+  let ret = ref Z.zero in
+  String.iter
+    (fun c ->
+      let to_add =
+        match c with
+        | '0' .. '9' -> Char.code c - Char.code '0'
+        | 'A' .. 'F' -> Char.code c - Char.code 'A' + 10
+        | _ -> failwith "invalid hexadecimal value"
+      in
+      ret := Z.add (Z.shift_left !ret 4) (Z.of_int to_add))
+    s;
+  !ret

@@ -1,10 +1,26 @@
 type t = { id : Id.t; sub : t list; named_sub : (Id.t * t) list }
 
+let make ?(sub = []) ?(named_sub = []) id = { id; sub; named_sub }
 let lookup name irep = List.assoc name irep.named_sub
+let lookup_opt name irep = List.assoc_opt name irep.named_sub
 
 module Infix = struct
   let ( $ ) irep name = lookup name irep
+  let ( $$ ) irep name = lookup (Id.of_string name) irep
+  let ( $? ) irep name = lookup_opt name irep
+  let ( $$? ) irep name = lookup_opt (Id.of_string name) irep
 end
+
+let as_just_string irep = Id.to_string irep.id
+let as_just_int irep = Id.to_int irep.id
+
+let as_just_bitpattern ~width ~signed irep =
+  Id.to_bitpattern ~width ~signed irep.id
+
+let is_nil irep =
+  match irep.id with
+  | Id.Nil -> true
+  | _ -> false
 
 let rec of_yojson json =
   let open Kutils.J in

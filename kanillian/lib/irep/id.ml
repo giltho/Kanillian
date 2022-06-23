@@ -2433,3 +2433,28 @@ let to_string str =
 let of_yojson = function
   | `String x -> of_string x
   | j -> Kutils.J.parse_error j "Id is not a string"
+
+let to_int_opt = function
+  | Id0 -> Some 0
+  | Id1 -> Some 1
+  | FreeformString s -> int_of_string_opt s
+  | _ -> None
+
+let to_int s =
+  match to_int_opt s with
+  | Some i -> i
+  | None -> raise (Invalid_argument "Invalid int id")
+
+let to_z = function
+  | Id0 -> Z.zero
+  | Id1 -> Z.one
+  | FreeformString s -> Z.of_string s
+  | _ -> raise (Invalid_argument "Invalid Z id")
+
+let to_z_opt s = try Some (to_z s) with Invalid_argument _ -> None
+
+let to_bitpattern ~width ~signed id =
+  let bits = Kutils.z_of_hex (to_string id) in
+  if signed && Z.gt bits (Z.shift_left Z.one (width - 3)) then
+    failwith "cannot handle bitpatterns properly yet";
+  bits
