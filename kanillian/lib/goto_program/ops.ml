@@ -30,10 +30,12 @@ module Binary = struct
     | Ror
     | Shl
     | Xor
+  [@@deriving show { with_path = false }]
 end
 
 module Self = struct
   type t = Postdecrement | Postincrement | Predecrement | Preincrement
+  [@@deriving show { with_path = false }]
 end
 
 module Unary = struct
@@ -52,4 +54,5 @@ module Unary = struct
         (**  `__builtin_cttz(self)` *)
     | CountLeadingZeros of { allow_zero : bool }  (**  `__builtin_ctlz(self)` *)
     | UnaryMinus  (**  `-self` *)
+  [@@deriving show { with_path = false }]
 end

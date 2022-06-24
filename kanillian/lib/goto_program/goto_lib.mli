@@ -58,10 +58,12 @@ module Ops : sig
       | Ror
       | Shl
       | Xor
+    [@@deriving show]
   end
 
   module Self : sig
     type t = Postdecrement | Postincrement | Predecrement | Preincrement
+    [@@deriving show]
   end
 
   module Unary : sig
@@ -79,6 +81,7 @@ module Ops : sig
       | CountTrailingZeros of { allow_zero : bool }
       | CountLeadingZeros of { allow_zero : bool }
       | UnaryMinus
+    [@@deriving show]
   end
 end
 
@@ -90,7 +93,7 @@ module Location : sig
 end
 
 module IntType : sig
-  type t = I_bool | I_char | I_int | I_size_t | I_ssize_t
+  type t = I_bool | I_char | I_int | I_size_t | I_ssize_t [@@deriving show]
 
   val pp : Format.formatter -> t -> unit
 
@@ -130,6 +133,7 @@ and Type : sig
     | Empty
   (* | Signedbv of { width : int }
      | Unsignedbv of { width : int } *)
+  [@@deriving show]
 
   val is_function : t -> bool
   val as_int_type : t -> IntType.t
@@ -138,8 +142,18 @@ and Type : sig
 end
 
 module Expr : sig
-  type value = IntConstant of Z.t | BoolConstant of bool | Symbol of string
+  type value =
+    | IntConstant of Z.t
+    | BoolConstant of bool
+    | Symbol of string
+    | FunctionCall of { func : t; args : t list }
+    | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
+    | AddressOf of t
+    | Index of { array : t; index : t }
+    | StringConstant of string
+
   and t = { value : value; type_ : Type.t; location : Location.t }
+  [@@deriving show]
 
   val as_symbol : t -> string
   val value_of_irep : machine:Machine_model.t -> type_:Type.t -> Irep.t -> value
@@ -151,6 +165,7 @@ module Stmt : sig
     | Decl of { lhs : Expr.t; value : Expr.t option }
     | Block of t list
     | Skip
+    | Expression of Expr.t
     | Return of Expr.t option
 
   and t = { location : Location.t; body : body }

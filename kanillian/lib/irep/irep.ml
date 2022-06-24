@@ -1,6 +1,7 @@
 type t = { id : Id.t; sub : t list; named_sub : (Id.t * t) list }
 
 let make ?(sub = []) ?(named_sub = []) id = { id; sub; named_sub }
+let nil = make Nil
 let lookup name irep = List.assoc name irep.named_sub
 let lookup_opt name irep = List.assoc_opt name irep.named_sub
 
@@ -38,3 +39,15 @@ let rec of_yojson json =
     | _ -> Kutils.J.parse_error json "namedSub is not an object!"
   in
   { id; sub; named_sub }
+
+let rec to_yojson irep =
+  `Assoc
+    [
+      ("id", `String (Id.to_string irep.id));
+      ("sub", `List (List.map to_yojson irep.sub));
+      ( "namedSub",
+        `Assoc
+          (List.map
+             (fun (x, i) -> (Id.to_string x, to_yojson i))
+             irep.named_sub) );
+    ]

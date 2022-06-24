@@ -9,18 +9,25 @@ module Bv_encoding = struct
     | I_int -> { signed = true; width = machine.int_width }
     | I_size_t -> { signed = false; width = machine.pointer_width }
     | I_char ->
-        { signed = machine.char_is_unsigned; width = machine.char_width }
+        { signed = not machine.char_is_unsigned; width = machine.char_width }
     | I_ssize_t -> { signed = true; width = machine.pointer_width }
-    | I_bool -> failwith "kani doesn't encode bools as bitvectors"
+    | I_bool -> Gerror.fail "kani doesn't encode bools as bitvectors"
 end
 
 let which_int_type_opt ~machine ~signed ~width =
   List.find_opt
     (fun it ->
       Bv_encoding.equal { signed; width } (Bv_encoding.encode ~machine it))
-    [ I_int; I_size_t; I_char; I_size_t; I_ssize_t ]
+    [ I_int; I_char; I_size_t; I_ssize_t ]
 
 let which_int_type ~machine ~signed ~width =
   match which_int_type_opt ~machine ~signed ~width with
-  | None -> failwith "no known int type for this kind of bitvectors"
+  | None ->
+      let msg =
+        Printf.sprintf
+          "no known int type for this kind of %ssigned bitvectors of width %d"
+          (if signed then "" else "un")
+          width
+      in
+      Gerror.fail msg
   | Some x -> x

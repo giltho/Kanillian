@@ -3,8 +3,9 @@
     Maybe there is a way to extract a better gillian location from
     CBMC locs, but it's not worth it right now. *)
 type tt = { source : string; line : int option; col : int option }
+[@@deriving show { with_path = false }]
 
-type t = tt option
+type t = tt option [@@deriving show { with_path = false }]
 
 let of_irep (irep : Irep.t) : t =
   let open Irep.Infix in
@@ -17,8 +18,8 @@ let of_irep (irep : Irep.t) : t =
              let line = Option.map Irep.as_just_int (irep $? Line) in
              let col = Option.map Irep.as_just_int (irep $? Column) in
              { source; line; col })
-  | _ -> failwith "wrong Irep location"
+  | _ -> Gerror.fail ~irep "wrong Irep location"
 
 let sloc_in_irep irep =
   let open Irep.Infix in
-  irep $? CSourceLocation |> Option.value ~default:(Irep.make Nil) |> of_irep
+  irep $? CSourceLocation |> Option.value ~default:Irep.nil |> of_irep
