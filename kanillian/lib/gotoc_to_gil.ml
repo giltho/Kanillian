@@ -57,22 +57,22 @@ let sanitize_symbol s = Str.global_replace (Str.regexp "[:]") "_" s
 let as_gil_variable e = GExpr.as_symbol e |> sanitize_symbol
 
 let compile_location (loc : Goto_lib.Location.t) =
-  match loc with
+  match loc.source with
   | None -> Location.none
-  | Some loc ->
+  | Some source ->
       let pos_line = Option.value ~default:0 loc.line in
       let pos_column = Option.value ~default:0 loc.col in
       let loc_start = Location.{ pos_line; pos_column } in
       let loc_end = Location.{ pos_line; pos_column = pos_column + 2 } in
-      Location.{ loc_source = loc.source; loc_start; loc_end }
+      Location.{ loc_source = source; loc_start; loc_end }
 
 let find_main symtab = Hashtbl.find symtab "main"
 
 module Body_item = struct
   type t = Annot.t * string option * string Cmd.t
 
-  let make ?loop ?label ?loc cmd : t =
-    let annot = Annot.make ?origin_loc:loc ?loop_info:loop () in
+  let make ?loop ?label ?loc ?id cmd : t =
+    let annot = Annot.make ?origin_loc:loc ?origin_id:id ?loop_info:loop () in
     (annot, label, cmd)
 end
 
@@ -130,7 +130,8 @@ let assume_type (type_ : GType.t) (lvar : string) =
 
 let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
   let loc = compile_location expr.location in
-  let b = Body_item.make ~loc in
+  let id = expr.location.origin_id in
+  let b = Body_item.make ~loc ~id in
   let add_annot = List.map b in
   match expr.value with
   | Symbol s -> ([], PVar (sanitize_symbol s))
@@ -225,7 +226,8 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
 
 let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
   let loc = compile_location stmt.location in
-  let b = Body_item.make ~loc in
+  let id = stmt.location.origin_id in
+  let b = Body_item.make ~loc ~id in
   let add_annot x = List.map b x in
   match stmt.body with
   | Skip -> [ b Skip ]

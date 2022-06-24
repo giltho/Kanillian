@@ -1,6 +1,17 @@
-type t = { id : Id.t; sub : t list; named_sub : (Id.t * t) list }
+type t = {
+  id : Id.t;
+  sub : t list;
+  named_sub : (Id.t * t) list;
+  unique_id : int;
+}
 
-let make ?(sub = []) ?(named_sub = []) id = { id; sub; named_sub }
+let make =
+  let counter = ref 0 in
+  fun ?(sub = []) ?(named_sub = []) id ->
+    let unique_id = !counter in
+    incr counter;
+    { id; sub; named_sub; unique_id }
+
 let nil = make Nil
 let lookup name irep = List.assoc name irep.named_sub
 let lookup_opt name irep = List.assoc_opt name irep.named_sub
@@ -38,7 +49,7 @@ let rec of_yojson json =
     | `Assoc l -> List.map (fun (n, j) -> (Id.of_string n, of_yojson j)) l
     | _ -> Kutils.J.parse_error json "namedSub is not an object!"
   in
-  { id; sub; named_sub }
+  make ~sub ~named_sub id
 
 let rec to_yojson irep =
   `Assoc

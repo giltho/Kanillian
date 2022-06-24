@@ -86,8 +86,12 @@ module Ops : sig
 end
 
 module Location : sig
-  type tt = { source : string; line : int option; col : int option }
-  type t = tt option
+  type t = {
+    origin_id : int;
+    source : string option;
+    line : int option;
+    col : int option;
+  }
 
   val of_irep : Irep.t -> t
 end
