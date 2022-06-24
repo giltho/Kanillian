@@ -1,0 +1,4 @@
+(install
+ (files cbmc_runtime.gil)
+ (section share)
+ (package kanillian))

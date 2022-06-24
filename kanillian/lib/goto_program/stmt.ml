@@ -1,7 +1,9 @@
 type body =
   | Decl of { lhs : Expr.t; value : Expr.t option }
-  (* | Assign of { lhs : Expr.t; rhs : Expr.t } *)
+  | Assign of { lhs : Expr.t; rhs : Expr.t }
   | Block of t list
+  | Label of string * t list
+  | Goto of string
   | Skip
   | Expression of Expr.t
   | Return of Expr.t option
@@ -17,9 +19,16 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
   let failwith = Gerror.fail ~irep in
   match (irep $ Statement).id with
   | Skip -> Skip
+  | Goto ->
+      let label = irep $ Destination |> Irep.as_just_string in
+      Goto label
   | Block ->
       let content = List.map of_irep irep.sub in
       Block content
+  | Label ->
+      let lab = irep $ Label |> Irep.as_just_string in
+      let block = List.map of_irep irep.sub in
+      Label (lab, block)
   | Decl ->
       let lhs, value =
         match irep.sub with
@@ -28,6 +37,13 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
         | _ -> failwith "Invalid declaration statement!"
       in
       Decl { lhs; value }
+  | Assign ->
+      let lhs, rhs =
+        match irep.sub with
+        | [ a; b ] -> (expr_of_irep a, expr_of_irep b)
+        | _ -> failwith "Assign stmt doesn't have two operands"
+      in
+      Assign { lhs; rhs }
   | Return ->
       let ret_value_irep =
         match irep.sub with

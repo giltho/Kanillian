@@ -5,7 +5,6 @@ module Machine_model : sig
     char_is_unsigned : bool;
     char_width : int;
     double_width : int;
-    float_width : int;
     int_width : int;
     is_big_endian : bool;
     long_double_width : int;
@@ -20,9 +19,12 @@ module Machine_model : sig
     wchar_t_width : int;
     word_size : int;
   }
-  [@@deriving eq]
+  [@@deriving eq, show]
 
   val archi64 : t
+
+  (** Consumes the architecture data from the symtab, and returns the built machine_model. *)
+  val consume_from_symtab : Symtab.t -> t
 end
 
 module Ops : sig
@@ -134,6 +136,7 @@ and Type : sig
     | CInteger of IntType.t
     | Code of { params : Param.t list; return_type : t }
     | Pointer of t
+    | StructTag of string
     | Empty
   (* | Signedbv of { width : int }
      | Unsignedbv of { width : int } *)
@@ -155,6 +158,7 @@ module Expr : sig
     | AddressOf of t
     | Index of { array : t; index : t }
     | StringConstant of string
+    | TypeCast of t
 
   and t = { value : value; type_ : Type.t; location : Location.t }
   [@@deriving show]
@@ -167,7 +171,10 @@ end
 module Stmt : sig
   type body =
     | Decl of { lhs : Expr.t; value : Expr.t option }
+    | Assign of { lhs : Expr.t; rhs : Expr.t }
     | Block of t list
+    | Label of string * t list
+    | Goto of string
     | Skip
     | Expression of Expr.t
     | Return of Expr.t option

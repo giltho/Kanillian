@@ -7,7 +7,7 @@ type value =
   | AddressOf of t
   | Index of { array : t; index : t }
   | StringConstant of string
-(* | Assign of { left : t; right : t } *)
+  | TypeCast of t
 
 and t = { value : value; type_ : Type.t; location : Location.t }
 [@@deriving show { with_path = false }]
@@ -79,6 +79,9 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Index ->
       let array, index = exactly_two ~msg:"Array Indexing" irep.sub in
       Index { array = of_irep array; index = of_irep index }
+  | Typecast ->
+      let value = exactly_one ~msg:"Type cast" irep.sub |> of_irep in
+      TypeCast value
   (* A bunch of binary operators now*)
   | Le -> lift_binop Le
   | Ge -> lift_binop Ge

@@ -4,6 +4,7 @@ type t = Typedefs__.type_ =
   | CInteger of IntType.t
   | Code of { params : Typedefs__.param list; return_type : t }
   | Pointer of t
+  | StructTag of string
   | Empty
 (*| Signedbv of { width: int }
   | Unsignedbv of { width: int } *)
@@ -57,6 +58,9 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
         | _ -> failwith "Pointer type has more than one operands"
       in
       Pointer points_to
+  | StructTag ->
+      let identifier = irep $ Identifier |> Irep.as_just_string in
+      StructTag identifier
   | Empty -> Empty
   | other -> failwith ("unhandled type: " ^ Id.to_string other)
 

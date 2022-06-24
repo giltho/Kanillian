@@ -80,7 +80,8 @@ let call_for_binop ~(lty : IntType.t) (binop : Ops.Binary.t) e1 e2 =
   (* For now, we assume we're on archi64 exactly, then we'll figure out a bit more *)
   assert (Machine_model.equal Machine_model.archi64 !Kconfig.machine_model);
   let internal_function =
-    let open Cgil_lib.CConstants.BinOp_Functions in
+    (* let open Cgil_lib.CConstants.BinOp_Functions in *)
+    let open! Kconstants.Comp_functions in
     match binop with
     | Le -> (
         match lty with
@@ -171,29 +172,74 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       (* The second argument of assert is a string that we may to keep
          alive for error messages. For now we're discarding it.
          In the future, we could change Gillian's assume to also have an error message *)
+      (* I should still find a way to factor out the call to assume and assert *)
       let to_assert =
         match args with
         | [ to_assert; _msg ] -> to_assert
         | _ -> failwith "__CPROVER_assert not given 2 params"
       in
-      let pre, to_assert = compile_expr to_assert in
-      let f =
-        let one = Gcu.Vt.gil_of_compcert (Vint Gcu.Camlcoq.Z.one) in
-        Formula.Eq (to_assert, Lit one)
+      (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
+      let cast_to_bool =
+        match to_assert.type_ with
+        | Bool -> false
+        | _ -> true
       in
-      (pre @ [ b (Logic (Assert f)) ], Lit Null)
+      let pre, to_assert = compile_expr to_assert in
+      let cast_call, to_assert =
+        if cast_to_bool then
+          let temp = temp_var () in
+          let bool_of_value =
+            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
+          in
+          let call =
+            Cmd.Call (temp, bool_of_value, [ to_assert ], None, None)
+          in
+          ([ b call ], Expr.PVar temp)
+        else ([], to_assert)
+      in
+      let f =
+        match Formula.lift_logic_expr to_assert with
+        | None ->
+            failwith
+              (Fmt.str "obtained weird expression that cannot be asserted: %a"
+                 Expr.pp to_assert)
+        | Some (f, _) -> f
+      in
+      (pre @ cast_call @ [ b (Logic (Assert f)) ], Lit Null)
   | FunctionCall { func; args } when is_assume_call func ->
       let to_assume =
         match args with
         | [ to_assume ] -> to_assume
         | _ -> failwith "__CPROVER_assume not given 1 params"
       in
-      let pre, to_assert = compile_expr to_assume in
-      let f =
-        let one = Gcu.Vt.gil_of_compcert (Vint Gcu.Camlcoq.Z.one) in
-        Formula.Eq (to_assert, Lit one)
+      (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
+      let cast_to_bool =
+        match to_assume.type_ with
+        | Bool -> false
+        | _ -> true
       in
-      (pre @ [ b (Logic (Assume f)) ], Lit Null)
+      let pre, to_assume = compile_expr to_assume in
+      let cast_call, to_assume =
+        if cast_to_bool then
+          let temp = temp_var () in
+          let bool_of_value =
+            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
+          in
+          let call =
+            Cmd.Call (temp, bool_of_value, [ to_assume ], None, None)
+          in
+          ([ b call ], Expr.PVar temp)
+        else ([], to_assume)
+      in
+      let f =
+        match Formula.lift_logic_expr to_assume with
+        | None ->
+            failwith
+              (Fmt.str "obtained weird expression that cannot be assumed: %a"
+                 Expr.pp to_assume)
+        | Some (f, _) -> f
+      in
+      (pre @ cast_call @ [ b (Logic (Assume f)) ], Lit Null)
   | FunctionCall { func; args } when is_nondet_call func ->
       let is_symbolic_exec =
         let open Gillian.Utils in
@@ -229,9 +275,17 @@ let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
   let id = stmt.location.origin_id in
   let b = Body_item.make ~loc ~id in
   let add_annot x = List.map b x in
+  let set_first_label label stmts =
+    match stmts with
+    | [] -> [ b ~label Skip ]
+    | (a, None, cmd) :: r -> (a, Some label, cmd) :: r
+    | (_, Some _, _) :: _ -> failwith "First label is already set!!"
+  in
   match stmt.body with
   | Skip -> [ b Skip ]
   | Block ss -> List.concat_map compile_statement ss
+  | Label (s, ss) -> List.concat_map compile_statement ss |> set_first_label s
+  | Goto lab -> [ b (Goto lab) ]
   | Return e ->
       let s, e =
         match e with
@@ -247,6 +301,10 @@ let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
         | Some e -> compile_expr e
         | None -> ([], Lit Undefined)
       in
+      s @ [ b (Assignment (lhs, v)) ]
+  | Assign { lhs; rhs } ->
+      let lhs = as_gil_variable lhs in
+      let s, v = compile_expr rhs in
       s @ [ b (Assignment (lhs, v)) ]
   | Expression e ->
       let s, _ = compile_expr e in
@@ -276,21 +334,26 @@ let compile_function ~(params : Param.t list) (sym : Gsymbol.t) :
       proc_spec;
     }
 
+let add_symbol prog (symbol : Gsymbol.t) =
+  match symbol.type_ with
+  | Code { params; _ } -> Prog.add_proc prog (compile_function ~params symbol)
+  | _ ->
+      failwith
+        ("Cannot compile other symbols than functions for now: " ^ symbol.name)
+
 let compile (symtab : Gsymtab.t) : (Annot.t, string) Prog.t =
   let prog = Prog.create () in
-  (* let functions = Hashtbl.fold (fun (s, m) -> if) *)
-  let main = find_main symtab in
-  let params =
-    match main.type_ with
-    | Code { params; _ } -> params
-    | _ -> failwith "main is not code??"
+  let prog =
+    Hashtbl.fold
+      (fun _ (s : Gsymbol.t) p -> if s.is_file_local then p else add_symbol p s)
+      symtab prog
   in
-  let prog = Prog.add_proc prog (compile_function ~params main) in
   assert (Machine_model.equal !Kconfig.machine_model Machine_model.archi64);
 
   let imports =
-    Cgil_lib.CConstants.Imports.imports Arch64
-      !Gillian.Utils.Config.current_exec_mode
-      Unallocated_functions
+    Kconstants.Imports.imports
+    @ Cgil_lib.CConstants.Imports.imports Arch64
+        !Gillian.Utils.Config.current_exec_mode
+        Unallocated_functions
   in
   { prog with imports }

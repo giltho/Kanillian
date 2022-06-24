@@ -4,6 +4,7 @@ type type_ =
   | CInteger of IntType.t
   | Code of { params : param list; return_type : type_ }
   | Pointer of type_
+  | StructTag of string
   | Empty
 
 (* | Signedbv of { width : int }

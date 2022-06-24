@@ -45,6 +45,10 @@
         "scope": "global",
         "val": "#{self.share}/gillian-c"
       },
+      "KANILLIAN_RUNTIME_PATH": {
+        "scope": "global",
+        "val": "#{self.share}/kanillian:#{self.share}/gillian-c"
+      },
       "CPATH": {
         "scope": "global",
         "val": "#{self.share / 'include' : $CPATH}"
