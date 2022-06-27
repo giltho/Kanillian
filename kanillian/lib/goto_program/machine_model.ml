@@ -98,11 +98,6 @@ module Builder = struct
     }
 end
 
-(** Modifies the symtab in-place,
-  removes every field corresponding to the machine model,
-  return the built machine model.
-  Will fail if the symtab is incomplete *)
-
 open Irep.Infix
 
 (* Once again, a bit hacky. This has been said somewhere else, but maybe
@@ -124,6 +119,10 @@ let as_string (sym : Symbol.t) =
   let ops = sym.value.sub in
   List.nth ops 1 $ Value |> Irep.as_just_string
 
+(** Modifies the symtab in-place,
+  removes every field corresponding to the machine model,
+  return the built machine model.
+  Will fail if the symtab is incomplete *)
 let consume_from_symtab (symtab : Symtab.t) =
   let open Builder in
   let builder = make_b () in

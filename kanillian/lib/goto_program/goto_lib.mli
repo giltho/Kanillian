@@ -129,14 +129,26 @@ module rec Param : sig
   val pp : Format.formatter -> t -> unit
 end
 
+and Datatype_component : sig
+  type t =
+    | Field of { name : string; type_ : Type.t }
+    | Padding of { name : string; bits : int }
+end
+
 and Type : sig
   type t =
     | Array of t * int
     | Bool
     | CInteger of IntType.t
+    | Float
+    | Double
     | Code of { params : Param.t list; return_type : t }
     | Pointer of t
+    | Struct of { components : Datatype_component.t list; tag : string }
     | StructTag of string
+    | Union of { components : Datatype_component.t list; tag : string }
+    | UnionTag of string
+    | Constructor
     | Empty
   (* | Signedbv of { width : int }
      | Unsignedbv of { width : int } *)
@@ -151,10 +163,14 @@ end
 module Expr : sig
   type value =
     | IntConstant of Z.t
+    | CBoolConstant of bool
     | BoolConstant of bool
     | Symbol of string
     | FunctionCall of { func : t; args : t list }
     | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
+    | ByteExtract of { e : t; offset : int }
+    | UnOp of { op : Ops.Unary.t; e : t }
+    | Struct of t list
     | AddressOf of t
     | Index of { array : t; index : t }
     | StringConstant of string
@@ -172,6 +188,8 @@ module Stmt : sig
   type body =
     | Decl of { lhs : Expr.t; value : Expr.t option }
     | Assign of { lhs : Expr.t; rhs : Expr.t }
+    | Assume of { cond : Expr.t }
+    | Assert of { cond : Expr.t }
     | Block of t list
     | Label of string * t list
     | Goto of string

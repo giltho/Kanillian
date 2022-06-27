@@ -19,6 +19,7 @@ module Comp_functions = struct
   let cmp_gt = "i__cbmc_binop_cmp_gt"
   let cmp_ge = "i__cbmc_binop_cmp_ge"
   let cmp_lt = "i__cbmc_binop_cmp_lt"
+  let cmpu_lt = "i__cbmc_binop_cmpu_lt"
   let cmp_le = "i__cbmc_binop_cmp_le"
   let cmp_eq = "i__cbmc_binop_cmp_eq"
   let cmp_ne = "i__cbmc_binop_cmp_ne"

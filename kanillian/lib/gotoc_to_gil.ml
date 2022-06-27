@@ -83,18 +83,30 @@ let call_for_binop ~(lty : IntType.t) (binop : Ops.Binary.t) e1 e2 =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
     let open! Kconstants.Comp_functions in
     match binop with
+    | Notequal -> (
+        match lty with
+        | I_int | I_char -> cmp_eq
+        | I_bool -> cmpu_eq
+        | I_size_t -> cmplu_eq
+        | I_ssize_t -> cmplu_eq)
     | Le -> (
         match lty with
         | I_int | I_char -> cmp_le
         | I_bool -> cmpu_le
-        | I_size_t -> cmpl_le
-        | I_ssize_t -> cmplu_le)
+        | I_size_t -> cmplu_le
+        | I_ssize_t -> cmpl_le)
+    | Lt -> (
+        match lty with
+        | I_int | I_char -> cmp_lt
+        | I_bool -> cmpu_lt
+        | I_size_t -> cmplu_lt
+        | I_ssize_t -> cmpl_lt)
     | Ge -> (
         match lty with
         | I_int | I_char -> cmp_ge
         | I_bool -> cmpu_ge
-        | I_size_t -> cmpl_ge
-        | I_ssize_t -> cmplu_ge)
+        | I_size_t -> cmplu_ge
+        | I_ssize_t -> cmpl_ge)
     | _ -> failwith "Unhandled binary operator: " ^ Ops.Binary.show binop
   in
   let gvar = temp_var () in
@@ -129,6 +141,20 @@ let assume_type (type_ : GType.t) (lvar : string) =
       [ assume_list; assume_int ]
   | _ -> failwith ("unhandled nondet for type: " ^ GType.show type_)
 
+let compile_cast ~(from : GType.t) ~(into : GType.t) e =
+  match (from, into) with
+  | Bool, CInteger (I_bool | I_char | I_int) ->
+      let temp = temp_var () in
+      let value_of_bool =
+        Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.val_of_bool)
+      in
+      let call = Cmd.Call (temp, value_of_bool, [ e ], None, None) in
+      (call, Expr.PVar temp)
+  | _ ->
+      failwith
+        (Printf.sprintf "Cannot perform cast yet from %s into %s"
+           (GType.show from) (GType.show into))
+
 let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
   let loc = compile_location expr.location in
   let id = expr.location.origin_id in
@@ -136,7 +162,8 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
   let add_annot = List.map b in
   match expr.value with
   | Symbol s -> ([], PVar (sanitize_symbol s))
-  | BoolConstant b ->
+  | BoolConstant b -> ([], Lit (Bool b))
+  | CBoolConstant b ->
       let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
       let lit = Gcu.Vt.gil_of_compcert (Gcu.Values.Vint i) in
       ([], Lit lit)
@@ -165,6 +192,14 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       let lty = lhs.type_ |> GType.as_int_type in
       let call, e = call_for_binop ~lty op e1 e2 in
       (s1 @ s2 @ [ b call ], e)
+  | UnOp { op; e } ->
+      let s, e = compile_expr e in
+      let ne =
+        match op with
+        | Not -> Expr.Infix.not e
+        | _ -> failwith ("Cannot handle operator yet: " ^ Ops.Unary.show op)
+      in
+      (s, ne)
       (* TODO: the following is not correct and might crash, I'm assuming the symbol name is the function name.
          This could be a function pointer, in which case, it should go through the
          global env thing *)
@@ -268,6 +303,12 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       let ret_var = temp_var () in
       let gil_call = Cmd.Call (ret_var, Lit (String fname), args, None, None) in
       (pre_cmd @ [ b gil_call ], PVar ret_var)
+  | TypeCast to_cast ->
+      let pre, to_cast_e = compile_expr to_cast in
+      let perform_cast, out =
+        compile_cast ~from:to_cast.type_ ~into:expr.type_ to_cast_e
+      in
+      (pre @ [ b perform_cast ], out)
   | _ -> failwith ("Cannot compile expr yet: " ^ GExpr.show expr)
 
 let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
@@ -286,6 +327,22 @@ let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
   | Block ss -> List.concat_map compile_statement ss
   | Label (s, ss) -> List.concat_map compile_statement ss |> set_first_label s
   | Goto lab -> [ b (Goto lab) ]
+  | Assume { cond } ->
+      let pre, e = compile_expr cond in
+      let f =
+        match Formula.lift_logic_expr e with
+        | None -> failwith (Fmt.str "Unable to lift: %a" Expr.pp e)
+        | Some (f, _) -> f
+      in
+      pre @ [ b (Logic (Assume f)) ]
+  | Assert { cond } ->
+      let pre, e = compile_expr cond in
+      let f =
+        match Formula.lift_logic_expr e with
+        | None -> failwith (Fmt.str "Unable to lift: %a" Expr.pp e)
+        | Some (f, _) -> f
+      in
+      pre @ [ b (Logic (Assert f)) ]
   | Return e ->
       let s, e =
         match e with

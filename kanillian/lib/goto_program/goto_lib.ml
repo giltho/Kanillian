@@ -2,6 +2,7 @@ module Machine_model = Machine_model
 module IntType = IntType
 module Ops = Ops
 module Param = Param
+module Datatype_component = Datatype_component
 module Type = Type
 module Location = Location
 module Expr = Expr

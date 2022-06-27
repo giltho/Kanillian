@@ -2,9 +2,15 @@ type type_ =
   | Array of type_ * int
   | Bool
   | CInteger of IntType.t
+  | Float
+  | Double
   | Code of { params : param list; return_type : type_ }
   | Pointer of type_
+  | Struct of { components : datatype_component list; tag : string }
   | StructTag of string
+  | Union of { components : datatype_component list; tag : string }
+  | UnionTag of string
+  | Constructor
   | Empty
 
 (* | Signedbv of { width : int }
@@ -14,4 +20,8 @@ and param = {
   identifier : string option;
   base_name : string option;
 }
+
+and datatype_component =
+  | Field of { name : string; type_ : type_ }
+  | Padding of { name : string; bits : int }
 [@@deriving show { with_path = false }]

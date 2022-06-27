@@ -1,6 +1,8 @@
 type body =
   | Decl of { lhs : Expr.t; value : Expr.t option }
   | Assign of { lhs : Expr.t; rhs : Expr.t }
+  | Assume of { cond : Expr.t }
+  | Assert of { cond : Expr.t }
   | Block of t list
   | Label of string * t list
   | Goto of string
@@ -44,6 +46,21 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
         | _ -> failwith "Assign stmt doesn't have two operands"
       in
       Assign { lhs; rhs }
+  | Assume ->
+      let to_assume =
+        match irep.sub with
+        | [ a ] -> expr_of_irep a
+        | _ -> failwith "Assume that doesn't have one operand"
+      in
+      Assume { cond = to_assume }
+  | Assert ->
+      (* I might need to extract the property_class/msg here too *)
+      let to_assert =
+        match irep.sub with
+        | [ a ] -> expr_of_irep a
+        | _ -> failwith "Assert that doesn't have one operand"
+      in
+      Assume { cond = to_assert }
   | Return ->
       let ret_value_irep =
         match irep.sub with

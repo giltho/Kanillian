@@ -1,9 +1,13 @@
 type value =
   | IntConstant of Z.t [@printer Z.pp_print]
+  | CBoolConstant of bool
   | BoolConstant of bool
   | Symbol of string
   | FunctionCall of { func : t; args : t list }
   | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
+  | ByteExtract of { e : t; offset : int }
+  | UnOp of { op : Ops.Unary.t; e : t }
+  | Struct of t list
   | AddressOf of t
   | Index of { array : t; index : t }
   | StringConstant of string
@@ -20,7 +24,18 @@ let as_symbol e =
 (** Lifting from Irep *)
 open Irep.Infix
 
-let rec side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
+let rec byte_extract ~(machine : Machine_model.t) irep =
+  let e, offset =
+    Lift_utils.exactly_two ~failwith:(Gerror.fail ~irep) irep.sub
+  in
+  let offset =
+    offset $ Value
+    |> Irep.as_just_bitpattern ~width:machine.pointer_width ~signed:true
+    |> Z.to_int
+  in
+  ByteExtract { e = of_irep ~machine e; offset }
+
+and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
   let failwith = Gerror.fail ~irep in
   let of_irep = of_irep ~machine in
   match (irep $ Statement).id with
@@ -40,11 +55,18 @@ and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
   | [ a; b ] -> BinOp { op; lhs = of_irep a; rhs = of_irep b }
   | _ -> Gerror.fail ~irep "Binary operator doesn't have exactly two operands"
 
+and lift_unop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Unary.t) =
+  let of_irep = of_irep ~machine in
+  match irep.sub with
+  | [ a ] -> UnOp { op; e = of_irep a }
+  | _ -> Gerror.fail ~irep "Unary operator doesn't have exactly one operand"
+
 and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
     =
   let failwith = Gerror.fail ~irep in
   let of_irep = of_irep ~machine in
   let lift_binop = lift_binop ~machine irep in
+  let lift_unop = lift_unop ~machine irep in
   let exactly_one = Lift_utils.exactly_one ~failwith in
   let exactly_two = Lift_utils.exactly_two ~failwith in
   match irep.id with
@@ -56,8 +78,8 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
             |> Irep.as_just_bitpattern ~width:machine.bool_width ~signed:false
           in
           match Z.to_int v with
-          | 1 -> BoolConstant true
-          | 0 -> BoolConstant false
+          | 1 -> CBoolConstant true
+          | 0 -> CBoolConstant false
           | _ -> failwith "Invalid bool constant")
       | CInteger int_ty ->
           (* Importantly, int_ty cannot be bool *)
@@ -67,8 +89,17 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
             |> Irep.as_just_bitpattern ~width:enc.width ~signed:enc.signed
           in
           IntConstant v
-      | _ -> failwith "cannot handle constant of non-integer types for now")
+      | Bool -> (
+          match (irep $ Value).id with
+          | True -> BoolConstant true
+          | False -> BoolConstant false
+          | _ -> failwith "invalid boolean value")
+      | _ -> failwith "cannot handle constant type for now")
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
+  | ByteExtractBigEndian when machine.is_big_endian ->
+      byte_extract ~machine irep
+  | ByteExtractLittleEndian when not machine.is_big_endian ->
+      byte_extract ~machine irep
   | Symbol ->
       let name = irep $ Identifier |> Irep.as_just_string in
       Symbol name
@@ -76,6 +107,9 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | AddressOf ->
       let pointee = exactly_one ~msg:"AddressOf" irep.sub in
       AddressOf (of_irep pointee)
+  | Struct ->
+      let fields = List.map of_irep irep.sub in
+      Struct fields
   | Index ->
       let array, index = exactly_two ~msg:"Array Indexing" irep.sub in
       Index { array = of_irep array; index = of_irep index }
@@ -85,6 +119,10 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   (* A bunch of binary operators now*)
   | Le -> lift_binop Le
   | Ge -> lift_binop Ge
+  | Lt -> lift_binop Lt
+  | Notequal -> lift_binop Notequal
+  (* And a bunch of unary operators *)
+  | Not -> lift_unop Not
   (* Catch-all *)
   | id -> failwith ("unhandled expr value: " ^ Id.to_string id)
 
