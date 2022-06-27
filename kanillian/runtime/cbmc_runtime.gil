@@ -144,6 +144,14 @@ proc i__cbmc_binop_cmp_lt(v1, v2) {
   unde: fail[comparison]("Using int comparison operator for non-int elements")
 };
 
+proc i__cbmc_binop_cmpu_lt(v1, v2) {
+        goto [ l-nth(v1, 0i) = "int" ] llon unde;
+  llon: goto [ l-nth(v2, 0i) = "int" ] blon unde;
+  blon: ret := l-nth(v1, 1i) i< l-nth(v2, 1i);
+        return;
+  unde: fail[comparison]("Using int comparison operator for non-int elements")
+};
+
 proc i__cbmc_binop_cmp_eq(v1, v2) {
         goto [ l-nth(v1, 0i) = "int" ] llon unde;
   llon: goto [ l-nth(v2, 0i) = "int" ] blon unde;
