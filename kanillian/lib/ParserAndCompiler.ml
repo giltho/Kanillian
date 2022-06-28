@@ -5,7 +5,7 @@ let initialize _ = CP.init_compcert ()
 let env_var_import_path = Some Kconstants.Imports.env_path_var
 let other_imports = []
 
-type tl_ast = Gsymtab.t
+type tl_ast = Program.t
 
 module TargetLangOptions = struct
   type t = { main_only : bool }
@@ -45,11 +45,9 @@ let parse_symtab_into_goto file =
           let ntbl = Hashtbl.create 1 in
           let () = Hashtbl.add ntbl "main" (Hashtbl.find tbl "main") in
           ntbl
-        else
-          let () = Sym_clean.clean_table tbl in
-          tbl
+        else tbl
       in
-      Goto_lib.Gsymtab.of_symtab ~machine tbl)
+      Goto_lib.Program.of_symtab ~machine tbl)
     tbl
 
 let create_compilation_result path goto_prog gil_prog =

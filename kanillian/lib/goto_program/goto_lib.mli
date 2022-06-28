@@ -215,45 +215,53 @@ module Stmt : sig
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end
 
-module SymbolValue : sig
-  type t = Expr of Expr.t | Stmt of Stmt.t | SVNone
+module Program : sig
+  module Global_var : sig
+    type t = {
+      type_ : Type.t;
+      symbol : string;
+      value : Expr.t option;
+      location : Location.t;
+    }
 
-  val of_irep : machine:Machine_model.t -> type_:Type.t -> Irep.t -> t
-end
+    val init : 'a -> unit
+  end
 
-module Gsymbol : sig
+  module Func : sig
+    type t = {
+      params : Param.t list;
+      body : Stmt.t option;
+      return_type : Type.t;
+      location : Location.t;
+      symbol : string;
+    }
+  end
+
   type t = {
-    name : string;
-    location : Location.t;
-    type_ : Type.t;
-    value : SymbolValue.t;
-    base_name : string option;
-    pretty_name : string option;
-    module_ : string option;
-    is_type : bool;
-    is_macro : bool;
-    is_exported : bool;
-    is_input : bool;
-    is_output : bool;
-    is_state_var : bool;
-    is_property : bool;
-    is_static_lifetime : bool;
-    is_thread_local : bool;
-    is_lvalue : bool;
-    is_file_local : bool;
-    is_extern : bool;
-    is_volatile : bool;
-    is_parameter : bool;
-    is_auxiliary : bool;
-    is_weak : bool;
+    vars : (string, Global_var.t) Hashtbl.t;
+    funs : (string, Func.t) Hashtbl.t;
+    types : (string, Type.t) Hashtbl.t;
   }
-  [@@deriving show]
-
-  val of_symbol : machine:Machine_model.t -> Symbol.t -> t
-end
-
-module Gsymtab : sig
-  type t = (string, Gsymbol.t) Hashtbl.t
 
   val of_symtab : machine:Machine_model.t -> Symtab.t -> t
+  val fold_functions : (string -> Func.t -> 'a -> 'a) -> t -> 'a -> 'a
+  val fold_variables : (string -> Global_var.t -> 'a -> 'a) -> t -> 'a -> 'a
+  val is_zst : prog:t -> Type.t -> bool
+end
+
+module Visitors : sig
+  class ['a] iter :
+    object
+      method visit_location : ctx:'a -> Location.t -> unit
+      method visit_binop : ctx:'a -> Ops.Binary.t -> unit
+      method visit_unop : ctx:'a -> Ops.Unary.t -> unit
+      method visit_selfop : ctx:'a -> Ops.Self.t -> unit
+      method visit_int_type : ctx:'a -> IntType.t -> unit
+      method visit_datatype_components : ctx:'a -> Datatype_component.t -> unit
+      method visit_type : ctx:'a -> Type.t -> unit
+      method visit_expr_value : ctx:'a -> Expr.value -> unit
+      method visit_expr : ctx:'a -> Expr.t -> unit
+      method visit_stmt_body : ctx:'a -> Stmt.body -> unit
+      method visit_stmt : ctx:'a -> Stmt.t -> unit
+    end
 end

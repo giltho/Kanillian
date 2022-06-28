@@ -141,6 +141,22 @@ let assume_type (type_ : GType.t) (lvar : string) =
       [ assume_list; assume_int ]
   | _ -> failwith ("unhandled nondet for type: " ^ GType.show type_)
 
+let nondet_expr ~add_annot ~type_ () =
+  let is_symbolic_exec =
+    let open Gillian.Utils in
+    ExecMode.symbolic_exec !Config.current_exec_mode
+  in
+  if not is_symbolic_exec then
+    failwith
+      "Looks like you're compiling some nondet variables, but you're not in \
+       concrete execution mode"
+  else
+    let hash_x = temp_lvar () in
+    let spec_var_cmd = Cmd.Logic (LCmd.SpecVar [ hash_x ]) in
+    let cmds = assume_type type_ hash_x in
+    let cmds = add_annot (spec_var_cmd :: cmds) in
+    (cmds, Expr.LVar hash_x)
+
 let compile_cast ~(from : GType.t) ~(into : GType.t) e =
   match (from, into) with
   | Bool, CInteger (I_bool | I_char | I_int) ->
@@ -276,25 +292,13 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       in
       (pre @ cast_call @ [ b (Logic (Assume f)) ], Lit Null)
   | FunctionCall { func; args } when is_nondet_call func ->
-      let is_symbolic_exec =
-        let open Gillian.Utils in
-        ExecMode.symbolic_exec !Config.current_exec_mode
+      let () =
+        match args with
+        | [] -> ()
+        | _ -> failwith "You should not be passing arguments to __nondet!"
       in
-      if not is_symbolic_exec then
-        failwith
-          "Looks like you're compiling some nondet variables, but you're not \
-           in concrete execution mode"
-      else
-        let () =
-          match args with
-          | [] -> ()
-          | _ -> failwith "You should not be passing arguments to __nondet!"
-        in
-        let hash_x = temp_lvar () in
-        let spec_var_cmd = Cmd.Logic (LCmd.SpecVar [ hash_x ]) in
-        let cmds = assume_type expr.type_ hash_x in
-        let cmds = add_annot (spec_var_cmd :: cmds) in
-        (cmds, LVar hash_x)
+      nondet_expr ~add_annot ~type_:expr.type_ ()
+  | Nondet -> nondet_expr ~add_annot ~type_:expr.type_ ()
   | FunctionCall { func; args } ->
       let fname = GExpr.as_symbol func in
 
@@ -366,24 +370,33 @@ let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
   | Expression e ->
       let s, _ = compile_expr e in
       s
+  | Switch _ -> failwith "Cannot compile switch statement yet"
 (* | _ -> failwith "Cannot compile statement yet" *)
 
-let compile_function ~(params : Param.t list) (sym : Gsymbol.t) :
-    (Annot.t, string) Proc.t =
-  if sym.is_volatile || sym.is_weak then
-    failwith "Cannot handled volatile or weak data yet";
-  let f_loc = compile_location sym.location in
-  let proc_params = List.map (fun x -> Option.get x.Param.identifier) params in
-  let proc_spec = None in
-  let stmt =
-    match sym.value with
-    | Stmt s -> s
-    | _ -> failwith "symbol value of function is not a statement"
+let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
+  let f_loc = compile_location func.location in
+  let body =
+    match func.body with
+    | Some b -> b
+    | None ->
+        let nondet =
+          GExpr.
+            {
+              location = func.location;
+              type_ = func.return_type;
+              value = Nondet;
+            }
+        in
+        Stmt.{ location = func.location; body = Return (Some nondet) }
   in
-  let proc_body = Array.of_list (compile_statement stmt) in
+  let proc_params =
+    List.map (fun x -> Option.get x.Param.identifier) func.params
+  in
+  let proc_spec = None in
+  let proc_body = Array.of_list (compile_statement body) in
   Proc.
     {
-      proc_name = sym.name;
+      proc_name = func.symbol;
       proc_source_path = Some f_loc.loc_source;
       proc_internal = false;
       proc_params;
@@ -391,26 +404,19 @@ let compile_function ~(params : Param.t list) (sym : Gsymbol.t) :
       proc_spec;
     }
 
-let add_symbol prog (symbol : Gsymbol.t) =
-  match symbol.type_ with
-  | Code { params; _ } -> Prog.add_proc prog (compile_function ~params symbol)
-  | _ ->
-      failwith
-        ("Cannot compile other symbols than functions for now: " ^ symbol.name)
+let compile (program : Program.t) : (Annot.t, string) Prog.t =
+  let gil_prog = Prog.create () in
 
-let compile (symtab : Gsymtab.t) : (Annot.t, string) Prog.t =
-  let prog = Prog.create () in
-  let prog =
-    Hashtbl.fold
-      (fun _ (s : Gsymbol.t) p -> if s.is_file_local then p else add_symbol p s)
-      symtab prog
+  let gil_prog =
+    Program.fold_functions
+      (fun _ f prog -> Prog.add_proc prog (compile_function f))
+      program gil_prog
   in
   assert (Machine_model.equal !Kconfig.machine_model Machine_model.archi64);
-
   let imports =
     Kconstants.Imports.imports
     @ Cgil_lib.CConstants.Imports.imports Arch64
         !Gillian.Utils.Config.current_exec_mode
         Unallocated_functions
   in
-  { prog with imports }
+  { gil_prog with imports }
