@@ -1,4 +1,5 @@
 type t = Expr of Expr.t | Stmt of Stmt.t | SVNone
+[@@deriving show { with_path = false }]
 
 let of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t) =
   if Irep.is_nil irep then SVNone

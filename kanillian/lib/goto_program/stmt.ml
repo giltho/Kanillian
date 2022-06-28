@@ -6,11 +6,15 @@ type body =
   | Block of t list
   | Label of string * t list
   | Goto of string
+  | Switch of { control : Expr.t; cases : switch_case list; default : t option }
   | Skip
   | Expression of Expr.t
   | Return of Expr.t option
 
+and switch_case = { case : Expr.t; body : t }
+
 and t = { location : Location.t; body : body }
+[@@deriving show { with_path = false }]
 
 (** Lifting from Irep *)
 open Irep.Infix
@@ -18,6 +22,7 @@ open Irep.Infix
 let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
   let of_irep = of_irep ~machine in
   let expr_of_irep = Expr.of_irep ~machine in
+  let exactly_two = Lift_utils.exactly_two ~failwith in
   let failwith = Gerror.fail ~irep in
   match (irep $ Statement).id with
   | Skip -> Skip
@@ -80,7 +85,53 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
                expression"
       in
       Expression (expr_of_irep irep_expr)
+  | Switch ->
+      let control, content = exactly_two ~msg:"Switch" irep.sub in
+      let control = expr_of_irep control in
+      let () =
+        match (content $ Statement).id with
+        | Block -> ()
+        | _ -> failwith "Switch body is not a block"
+      in
+      let cases, default = switch_cases_of_irep ~machine content.sub in
+      Switch { control; cases; default }
   | _ -> failwith "unhandled statement"
+
+and switch_cases_of_irep ~machine l =
+  let is_default irep =
+    match irep $? Default with
+    | Some { id = Id1; _ } -> true
+    | _ -> false
+  in
+  match l with
+  | [] -> ([], None)
+  | a :: r when is_default a -> (
+      let exactly_two = Lift_utils.exactly_two ~failwith in
+      let failwith = Gerror.fail ~irep:a in
+      let () =
+        match (a $ Statement).id with
+        | SwitchCase -> ()
+        | _ ->
+            failwith "Switch body contains something that is not a switch case"
+      in
+      let _, stmt = exactly_two ~msg:"default switch_case" a.sub in
+      match switch_cases_of_irep ~machine r with
+      | rest, None -> (rest, Some (of_irep ~machine stmt))
+      | _, Some _ -> failwith "two default switch_cases!")
+  | a :: r ->
+      let exactly_two = Lift_utils.exactly_two ~failwith in
+      let failwith = Gerror.fail ~irep:a in
+      let () =
+        match (a $ Statement).id with
+        | SwitchCase -> ()
+        | _ ->
+            failwith "Switch body contains something that is not a switch case"
+      in
+      let cases, default = switch_cases_of_irep ~machine r in
+      let case, body = exactly_two a.sub in
+      let case = Expr.of_irep ~machine case in
+      let body = of_irep ~machine body in
+      ({ case; body } :: cases, default)
 
 and of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let location = Location.sloc_in_irep irep in

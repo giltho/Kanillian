@@ -142,16 +142,17 @@ and Type : sig
     | CInteger of IntType.t
     | Float
     | Double
+    | Signedbv of { width : int }
+    | Unsignedbv of { width : int }
     | Code of { params : Param.t list; return_type : t }
     | Pointer of t
     | Struct of { components : Datatype_component.t list; tag : string }
+    | IncompleteStruct of string
     | StructTag of string
     | Union of { components : Datatype_component.t list; tag : string }
     | UnionTag of string
     | Constructor
     | Empty
-  (* | Signedbv of { width : int }
-     | Unsignedbv of { width : int } *)
   [@@deriving show]
 
   val is_function : t -> bool
@@ -162,19 +163,24 @@ end
 
 module Expr : sig
   type value =
+    | Array of t list
     | IntConstant of Z.t
     | CBoolConstant of bool
     | BoolConstant of bool
+    | PointerConstant of int
     | Symbol of string
     | FunctionCall of { func : t; args : t list }
     | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
     | ByteExtract of { e : t; offset : int }
+    | Dereference of t
     | UnOp of { op : Ops.Unary.t; e : t }
     | Struct of t list
+    | Member of { lhs : t; field : string }
     | AddressOf of t
     | Index of { array : t; index : t }
     | StringConstant of string
     | TypeCast of t
+    | Nondet
 
   and t = { value : value; type_ : Type.t; location : Location.t }
   [@@deriving show]
@@ -193,10 +199,16 @@ module Stmt : sig
     | Block of t list
     | Label of string * t list
     | Goto of string
+    | Switch of {
+        control : Expr.t;
+        cases : switch_case list;
+        default : t option;
+      }
     | Skip
     | Expression of Expr.t
     | Return of Expr.t option
 
+  and switch_case = { case : Expr.t; body : t }
   and t = { location : Location.t; body : body }
 
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body
@@ -235,6 +247,7 @@ module Gsymbol : sig
     is_auxiliary : bool;
     is_weak : bool;
   }
+  [@@deriving show]
 
   val of_symbol : machine:Machine_model.t -> Symbol.t -> t
 end

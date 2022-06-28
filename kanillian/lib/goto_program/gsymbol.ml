@@ -23,6 +23,9 @@ type t = {
   is_auxiliary : bool;
   is_weak : bool;
 }
+[@@deriving show]
+
+(* TODO: This could be made more compact by keeping a all the flags in a bitfield *)
 
 let of_symbol ~(machine : Machine_model.t) (isym : Symbol.t) : t =
   let str_opt = function

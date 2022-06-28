@@ -4,16 +4,17 @@ type t = Typedefs__.type_ =
   | CInteger of IntType.t
   | Float
   | Double
+  | Signedbv of { width : int }
+  | Unsignedbv of { width : int }
   | Code of { params : Typedefs__.param list; return_type : t }
   | Pointer of t
   | Struct of { components : Typedefs__.datatype_component list; tag : string }
+  | IncompleteStruct of string
   | StructTag of string
   | Union of { components : Typedefs__.datatype_component list; tag : string }
   | UnionTag of string
   | Constructor
   | Empty
-(*| Signedbv of { width: int }
-  | Unsignedbv of { width: int } *)
 [@@deriving show { with_path = false }]
 
 let pp fmt t = Typedefs__.pp_type_ fmt t
@@ -35,6 +36,11 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let of_irep = of_irep ~machine in
   let datatype_component_of_irep = datatype_component_of_irep ~machine in
   let failwith = Gerror.fail ~irep in
+  let ( $ ) irep name =
+    match irep $? name with
+    | Some e -> e
+    | None -> failwith ("Couldn't find " ^ Id.to_string name)
+  in
   match irep.id with
   | Array ->
       let elem_ty = List.hd irep.sub |> of_irep in
@@ -49,18 +55,18 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
       | 52 -> Double
       | _ -> failwith "unsupported floatbv kind")
   | CBool -> CInteger I_bool
-  | Unsignedbv ->
-      let int_ty =
-        IntType.which_int_type ~machine ~signed:false
-          ~width:(irep $ Width |> Irep.as_just_int)
-      in
-      CInteger int_ty
-  | Signedbv ->
-      let int_ty =
-        IntType.which_int_type ~machine ~signed:true
-          ~width:(irep $ Width |> Irep.as_just_int)
-      in
-      CInteger int_ty
+  | Unsignedbv -> (
+      let width = irep $ Width |> Irep.as_just_int in
+      let int_ty = IntType.which_int_type_opt ~machine ~signed:false ~width in
+      match int_ty with
+      | Some int_ty -> CInteger int_ty
+      | None -> Unsignedbv { width })
+  | Signedbv -> (
+      let width = irep $ Width |> Irep.as_just_int in
+      let int_ty = IntType.which_int_type_opt ~machine ~signed:true ~width in
+      match int_ty with
+      | Some int_ty -> CInteger int_ty
+      | None -> Signedbv { width })
   | Code ->
       let param_ireps = irep $ Parameters in
       let params = List.map (param_of_irep ~machine) param_ireps.sub in
@@ -74,11 +80,18 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
       in
       Pointer points_to
   | Struct ->
-      let tag = irep $ Tag |> Irep.as_just_string in
-      let components =
-        (irep $ Components).sub |> List.map datatype_component_of_irep
+      let incomplete =
+        match irep $? Incomplete with
+        | Some { id = Id1; _ } -> true
+        | _ -> false
       in
-      Struct { components; tag }
+      let tag = irep $ Tag |> Irep.as_just_string in
+      if incomplete then IncompleteStruct tag
+      else
+        let components =
+          (irep $ Components).sub |> List.map datatype_component_of_irep
+        in
+        Struct { components; tag }
   | StructTag ->
       let identifier = irep $ Identifier |> Irep.as_just_string in
       StructTag identifier

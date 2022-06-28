@@ -4,9 +4,12 @@ type type_ =
   | CInteger of IntType.t
   | Float
   | Double
+  | Signedbv of { width : int }
+  | Unsignedbv of { width : int }
   | Code of { params : param list; return_type : type_ }
   | Pointer of type_
   | Struct of { components : datatype_component list; tag : string }
+  | IncompleteStruct of string
   | StructTag of string
   | Union of { components : datatype_component list; tag : string }
   | UnionTag of string

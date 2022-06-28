@@ -1,17 +1,22 @@
 type value =
+  | Array of t list
   | IntConstant of Z.t [@printer Z.pp_print]
   | CBoolConstant of bool
   | BoolConstant of bool
+  | PointerConstant of int
   | Symbol of string
   | FunctionCall of { func : t; args : t list }
   | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
   | ByteExtract of { e : t; offset : int }
+  | Dereference of t
   | UnOp of { op : Ops.Unary.t; e : t }
   | Struct of t list
+  | Member of { lhs : t; field : string }
   | AddressOf of t
   | Index of { array : t; index : t }
   | StringConstant of string
   | TypeCast of t
+  | Nondet
 
 and t = { value : value; type_ : Type.t; location : Location.t }
 [@@deriving show { with_path = false }]
@@ -46,6 +51,7 @@ and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
         | _ -> failwith "function call with not exactly 2 subs"
       in
       FunctionCall { func; args }
+  | Nondet -> Nondet
   | _ -> failwith "unknown side-effecting irep"
 
 and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
@@ -70,6 +76,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   let exactly_one = Lift_utils.exactly_one ~failwith in
   let exactly_two = Lift_utils.exactly_two ~failwith in
   match irep.id with
+  | Array -> Array (List.map of_irep irep.sub)
   | Constant -> (
       match type_ with
       | CInteger I_bool -> (
@@ -94,7 +101,19 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
           | True -> BoolConstant true
           | False -> BoolConstant false
           | _ -> failwith "invalid boolean value")
-      | _ -> failwith "cannot handle constant type for now")
+      | Unsignedbv { width } ->
+          let v =
+            irep $ Value |> Irep.as_just_bitpattern ~width ~signed:false
+          in
+          IntConstant v
+      | Signedbv { width } ->
+          let v = irep $ Value |> Irep.as_just_bitpattern ~width ~signed:true in
+          IntConstant v
+      | Pointer _ -> (
+          match (irep $ Value).id with
+          | NULL -> PointerConstant 0
+          | _ -> failwith "Pointer constant that is not NULL")
+      | _ -> failwith "Cannot handle this constant of this type yet")
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->
       byte_extract ~machine irep
@@ -103,6 +122,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Symbol ->
       let name = irep $ Identifier |> Irep.as_just_string in
       Symbol name
+  | Dereference -> Dereference (of_irep (exactly_one irep.sub))
   | SideEffect -> side_effecting_of_irep ~machine irep
   | AddressOf ->
       let pointee = exactly_one ~msg:"AddressOf" irep.sub in
@@ -110,19 +130,60 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Struct ->
       let fields = List.map of_irep irep.sub in
       Struct fields
+  | Member ->
+      let lhs = exactly_one ~msg:"Member" irep.sub |> of_irep in
+      let field = irep $ ComponentName |> Irep.as_just_string in
+      Member { lhs; field }
   | Index ->
       let array, index = exactly_two ~msg:"Array Indexing" irep.sub in
       Index { array = of_irep array; index = of_irep index }
   | Typecast ->
       let value = exactly_one ~msg:"Type cast" irep.sub |> of_irep in
       TypeCast value
+  | Nondet -> Nondet
   (* A bunch of binary operators now*)
-  | Le -> lift_binop Le
+  | And -> lift_binop And
+  | Ashr -> lift_binop Ashr
+  | Bitand -> lift_binop Bitand
+  | Bitor -> lift_binop Bitor
+  | Bitnand -> lift_binop Bitnand
+  | Bitxor -> lift_binop Bitxor
+  | Div -> lift_binop Div
+  | Equal -> lift_binop Equal
   | Ge -> lift_binop Ge
+  | Gt -> lift_binop Gt
+  | IeeeFloatEqual -> lift_binop IeeeFloatEqual
+  | IeeeFloatNotequal -> lift_binop IeeeFloatNotequal
+  | Implies -> lift_binop Implies
+  | Le -> lift_binop Le
+  | Lshr -> lift_binop Lshr
   | Lt -> lift_binop Lt
+  | Minus -> lift_binop Minus
+  | Mod -> lift_binop Mod
+  | Mult -> lift_binop Mult
   | Notequal -> lift_binop Notequal
+  | Or -> lift_binop Or
+  | OverflowMinus -> lift_binop OverflowMinus
+  | OverflowMult -> lift_binop OverflowMult
+  | OverflowPlus -> lift_binop OverflowPlus
+  | Plus -> lift_binop Plus
+  | ROk -> lift_binop ROk
+  | Rol -> lift_binop Rol
+  | Ror -> lift_binop Ror
+  | Shl -> lift_binop Shl
+  | Xor -> lift_binop Xor
   (* And a bunch of unary operators *)
+  | Bitnot -> lift_unop Bitnot
+  | BitReverse -> lift_unop BitReverse
+  | Bswap -> lift_unop Bswap
+  | IsDynamicObject -> lift_unop IsDynamicObject
+  | IsFinite -> lift_unop IsFinite
   | Not -> lift_unop Not
+  | ObjectSize -> lift_unop ObjectSize
+  | PointerObject -> lift_unop PointerObject
+  | PointerOffset -> lift_unop PointerOffset
+  | Popcount -> lift_unop Popcount
+  | UnaryMinus -> lift_unop UnaryMinus
   (* Catch-all *)
   | id -> failwith ("unhandled expr value: " ^ Id.to_string id)
 
