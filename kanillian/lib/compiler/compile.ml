@@ -3,14 +3,6 @@ module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
 open Gillian.Utils.Prelude
 
-exception CompilationError of string
-
-let () =
-  Printexc.register_printer (function
-    | CompilationError msg ->
-        Some ("Error happened while compiling from GotoC to Gil:\n\n" ^ msg)
-    | _ -> None)
-
 let symbols_in_memory ~prog =
   let representable_in_store (type_ : GType.t) =
     match type_ with
@@ -49,8 +41,6 @@ let symbols_in_memory ~prog =
   in
   fun ?(set = Hashset.empty ()) e -> addressed_visitor#visit_expr ~ctx:set e
 
-let failwith msg = raise (CompilationError msg)
-
 let as_pure_string_literal (e : GExpr.t) =
   match e.value with
   | AddressOf
@@ -66,7 +56,7 @@ let as_pure_string_literal (e : GExpr.t) =
       let idx = Z.to_int z in
       String.sub str (Z.to_int z) (String.length str - idx)
   | StringConstant str -> str
-  | _ -> failwith ("not a pure string literal: " ^ GExpr.show e)
+  | _ -> Error.unexpected ("not a pure string literal: " ^ GExpr.show e)
 
 (** Gillian-C utils for compilation*)
 module Gcu = struct
@@ -133,7 +123,7 @@ let call_for_binop
         | I_bool -> cmpu_ge
         | I_size_t -> cmplu_ge
         | I_ssize_t -> cmpl_ge)
-    | _ -> failwith "Unhandled binary operator: " ^ Ops.Binary.show binop
+    | _ -> Error.unhandled "binary operator: " ^ Ops.Binary.show binop
   in
   let gvar = Ctx.fresh_v ctx in
   let call =
@@ -153,7 +143,7 @@ let assume_type ~ctx (type_ : GType.t) (lvar : string) =
       let str_constr =
         match ty with
         | I_int -> int_type
-        | _ -> failwith ("unhandled nondet for int type: " ^ IntType.show ty)
+        | _ -> Error.unhandled ("nondet for int type: " ^ IntType.show ty)
       in
       let value = Ctx.fresh_lv ctx in
       let e_value = Expr.LVar value in
@@ -217,9 +207,9 @@ let nondet_expr ~ctx ~add_annot ~type_ () =
     ExecMode.symbolic_exec !Config.current_exec_mode
   in
   if not is_symbolic_exec then
-    failwith
+    Error.user_error
       "Looks like you're compiling some nondet variables, but you're not in \
-       concrete execution mode"
+       symbolic execution mode"
   else
     let hash_x = Ctx.fresh_lv ctx in
     let spec_var_cmd = Cmd.Logic (LCmd.SpecVar [ hash_x ]) in
@@ -237,7 +227,7 @@ let compile_cast ~ctx ~(from : GType.t) ~(into : GType.t) e =
       let call = Cmd.Call (temp, value_of_bool, [ e ], None, None) in
       (call, Expr.PVar temp)
   | _ ->
-      failwith
+      Error.unhandled
         (Printf.sprintf "Cannot perform cast yet from %s into %s"
            (GType.show from) (GType.show into))
 
@@ -266,11 +256,12 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
             match ctx.machine.pointer_width with
             | 32 -> Vint cz
             | 64 -> Vlong cz
-            | _ -> failwith "Gillian only handles archi 32 and archi 64 for now"
-            )
+            | _ ->
+                Error.unhandled
+                  "Gillian only handles archi 32 and archi 64 for now")
         | I_ssize_t ->
-            failwith "Lookup in compcert what kind of value ssize_t is"
-        | I_bool -> failwith "IntConstant with type I_bool"
+            Error.unhandled "Lookup in compcert what kind of value ssize_t is"
+        | I_bool -> Error.unexpected "IntConstant with type I_bool"
       in
       let lit = Gcu.Vt.gil_of_compcert ccert_value in
       ([], Lit lit)
@@ -285,7 +276,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let ne =
         match op with
         | Not -> Expr.Infix.not e
-        | _ -> failwith ("Cannot handle operator yet: " ^ Ops.Unary.show op)
+        | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op)
       in
       (s, ne)
       (* TODO: the following is not correct and might crash, I'm assuming the symbol name is the function name.
@@ -299,7 +290,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let to_assert =
         match args with
         | [ to_assert; _msg ] -> to_assert
-        | _ -> failwith "__CPROVER_assert not given 2 params"
+        | _ -> Error.user_error "__CPROVER_assert not given 2 params"
       in
       (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
       let cast_to_bool =
@@ -323,7 +314,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let f =
         match Formula.lift_logic_expr to_assert with
         | None ->
-            failwith
+            Error.code_error
               (Fmt.str "obtained weird expression that cannot be asserted: %a"
                  Expr.pp to_assert)
         | Some (f, _) -> f
@@ -333,7 +324,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let to_assume =
         match args with
         | [ to_assume ] -> to_assume
-        | _ -> failwith "__CPROVER_assume not given 1 params"
+        | _ -> Error.user_error "__CPROVER_assume not given 1 params"
       in
       (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
       let cast_to_bool =
@@ -357,7 +348,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let f =
         match Formula.lift_logic_expr to_assume with
         | None ->
-            failwith
+            Error.code_error
               (Fmt.str "obtained weird expression that cannot be assumed: %a"
                  Expr.pp to_assume)
         | Some (f, _) -> f
@@ -367,7 +358,8 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let () =
         match args with
         | [] -> ()
-        | _ -> failwith "You should not be passing arguments to __nondet!"
+        | _ ->
+            Error.user_error "You should not be passing arguments to __nondet!"
       in
       nondet_expr ~ctx ~add_annot ~type_:expr.type_ ()
   | Nondet -> nondet_expr ~ctx ~add_annot ~type_:expr.type_ ()
@@ -385,7 +377,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
         compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
       in
       (pre @ [ b perform_cast ], out)
-  | _ -> failwith ("Cannot compile expr yet: " ^ GExpr.show expr)
+  | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
 
 let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let compile_statement = compile_statement ~ctx in
@@ -398,7 +390,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
     match stmts with
     | [] -> [ b ~label Skip ]
     | (a, None, cmd) :: r -> (a, Some label, cmd) :: r
-    | (_, Some _, _) :: _ -> failwith "First label is already set!!"
+    | (_, Some _, _) :: _ -> Error.code_error "First label is already set!!"
   in
   match stmt.body with
   | Skip -> [ b Skip ]
@@ -409,7 +401,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let pre, e = compile_expr cond in
       let f =
         match Formula.lift_logic_expr e with
-        | None -> failwith (Fmt.str "Unable to lift: %a" Expr.pp e)
+        | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
         | Some (f, _) -> f
       in
       pre @ [ b (Logic (Assume f)) ]
@@ -417,7 +409,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let pre, e = compile_expr cond in
       let f =
         match Formula.lift_logic_expr e with
-        | None -> failwith (Fmt.str "Unable to lift: %a" Expr.pp e)
+        | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
         | Some (f, _) -> f
       in
       pre @ [ b (Logic (Assert f)) ]
@@ -444,8 +436,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   | Expression e ->
       let s, _ = compile_expr e in
       s
-  | Switch _ -> failwith "Cannot compile switch statement yet"
-(* | _ -> failwith "Cannot compile statement yet" *)
+  | Switch _ -> Error.unhandled "switch statement"
 
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let ctx = Ctx.with_new_generators ctx in
