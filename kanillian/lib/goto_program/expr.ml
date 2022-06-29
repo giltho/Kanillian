@@ -56,15 +56,14 @@ let show = Fmt.to_to_string pp
 let as_symbol e =
   match e.value with
   | Symbol s -> s
-  | _ -> Gerror.fail "Expected a symbol, got something else!"
+  | _ -> Gerror.unexpected "Expected a symbol, got something else!"
 
 open Irep.Infix
+open Lift_utils
 
 (** Lifting from Irep *)
 let rec byte_extract_of_irep ~(machine : Machine_model.t) irep =
-  let e, offset =
-    Lift_utils.exactly_two ~failwith:(Gerror.fail ~irep) irep.sub
-  in
+  let e, offset = exactly_two irep in
   let offset =
     offset $ Value
     |> Irep.as_just_bitpattern ~width:machine.pointer_width ~signed:true
@@ -73,40 +72,41 @@ let rec byte_extract_of_irep ~(machine : Machine_model.t) irep =
   ByteExtract { e = of_irep ~machine e; offset }
 
 and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
-  let failwith = Gerror.fail ~irep in
   let of_irep = of_irep ~machine in
   match (irep $ Statement).id with
   | FunctionCall ->
       let func, args =
         match irep.sub with
         | [ fsym; args ] -> (of_irep fsym, List.map of_irep args.sub)
-        | _ -> failwith "function call with not exactly 2 subs"
+        | _ -> Gerror.unexpected ~irep "function call with not exactly 2 subs"
       in
       FunctionCall { func; args }
   | Nondet -> Nondet
-  | _ -> failwith "unknown side-effecting irep"
+  | _ -> Gerror.unhandled ~irep "unknown side-effecting irep"
 
 and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
     =
   let of_irep = of_irep ~machine in
   match irep.sub with
   | [ a; b ] -> BinOp { op; lhs = of_irep a; rhs = of_irep b }
-  | _ -> Gerror.fail ~irep "Binary operator doesn't have exactly two operands"
+  | _ ->
+      Gerror.unexpected ~irep
+        "Binary operator doesn't have exactly two operands"
 
 and lift_unop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Unary.t) =
   let of_irep = of_irep ~machine in
   match irep.sub with
   | [ a ] -> UnOp { op; e = of_irep a }
-  | _ -> Gerror.fail ~irep "Unary operator doesn't have exactly one operand"
+  | _ ->
+      Gerror.unexpected ~irep "Unary operator doesn't have exactly one operand"
 
 and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
     =
-  let failwith = Gerror.fail ~irep in
+  let unexpected = Gerror.unexpected ~irep in
+  let unhandled = Gerror.unhandled ~irep in
   let of_irep = of_irep ~machine in
   let lift_binop = lift_binop ~machine irep in
   let lift_unop = lift_unop ~machine irep in
-  let exactly_one = Lift_utils.exactly_one ~failwith in
-  let exactly_two = Lift_utils.exactly_two ~failwith in
   match irep.id with
   | Array -> Array (List.map of_irep irep.sub)
   | Constant -> (
@@ -119,7 +119,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
           match Z.to_int v with
           | 1 -> CBoolConstant true
           | 0 -> CBoolConstant false
-          | _ -> failwith "Invalid bool constant")
+          | _ -> unexpected "Invalid bool constant")
       | CInteger int_ty ->
           (* Importantly, int_ty cannot be bool *)
           let enc = IntType.Bv_encoding.encode ~machine int_ty in
@@ -132,7 +132,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
           match (irep $ Value).id with
           | True -> BoolConstant true
           | False -> BoolConstant false
-          | _ -> failwith "invalid boolean value")
+          | _ -> unexpected "invalid boolean value")
       | Unsignedbv { width } ->
           let v =
             irep $ Value |> Irep.as_just_bitpattern ~width ~signed:false
@@ -144,8 +144,8 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
       | Pointer _ -> (
           match (irep $ Value).id with
           | NULL -> PointerConstant 0
-          | _ -> failwith "Pointer constant that is not NULL")
-      | _ -> failwith "Cannot handle this constant of this type yet")
+          | _ -> unhandled "Pointer constant that is not NULL")
+      | _ -> unhandled "Cannot handle this constant of this type yet")
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->
       byte_extract_of_irep ~machine irep
@@ -154,23 +154,23 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Symbol ->
       let name = irep $ Identifier |> Irep.as_just_string in
       Symbol name
-  | Dereference -> Dereference (of_irep (exactly_one irep.sub))
+  | Dereference -> Dereference (of_irep (exactly_one irep))
   | SideEffect -> side_effecting_of_irep ~machine irep
   | AddressOf ->
-      let pointee = exactly_one ~msg:"AddressOf" irep.sub in
+      let pointee = exactly_one ~msg:"AddressOf" irep in
       AddressOf (of_irep pointee)
   | Struct ->
       let fields = List.map of_irep irep.sub in
       Struct fields
   | Member ->
-      let lhs = exactly_one ~msg:"Member" irep.sub |> of_irep in
+      let lhs = exactly_one ~msg:"Member" irep |> of_irep in
       let field = irep $ ComponentName |> Irep.as_just_string in
       Member { lhs; field }
   | Index ->
-      let array, index = exactly_two ~msg:"Array Indexing" irep.sub in
+      let array, index = exactly_two ~msg:"Array Indexing" irep in
       Index { array = of_irep array; index = of_irep index }
   | Typecast ->
-      let value = exactly_one ~msg:"Type cast" irep.sub |> of_irep in
+      let value = exactly_one ~msg:"Type cast" irep |> of_irep in
       TypeCast value
   | Nondet -> Nondet
   (* A bunch of binary operators now*)
@@ -217,7 +217,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Popcount -> lift_unop Popcount
   | UnaryMinus -> lift_unop UnaryMinus
   (* Catch-all *)
-  | id -> failwith ("unhandled expr value: " ^ Id.to_string id)
+  | id -> unhandled ("unhandled expr value: " ^ Id.to_string id)
 
 and of_irep ~machine irep =
   let location = Location.sloc_in_irep irep in

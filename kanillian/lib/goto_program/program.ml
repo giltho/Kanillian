@@ -42,21 +42,21 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
          else
            let () =
              if sym.is_weak || sym.is_volatile then
-               failwith "Unhandled weak or volatile value"
+               Gerror.unhandled "weak or volatile value"
            in
            let location = Location.of_irep sym.location in
            let type_ = Type.of_irep ~machine sym.type_ in
            let value = SymbolValue.of_irep ~machine ~type_ sym.value in
            if sym.is_type then Hashtbl.add env.types name type_
            else
-             let failwith = Gerror.fail ~irep:sym.value in
              match type_ with
              | Code { params; return_type } ->
                  let body =
                    match value with
                    | SVNone -> None
                    | Stmt s -> Some s
-                   | Expr _ -> failwith "function body is not a statment"
+                   | Expr _ ->
+                       Gerror.unexpected "function body is not a statment"
                  in
                  let func =
                    Func.{ symbol = name; params; return_type; location; body }
@@ -67,7 +67,8 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
                    match value with
                    | SVNone -> None
                    | Expr e -> Some e
-                   | _ -> failwith "variable value is not an expression"
+                   | _ ->
+                       Gerror.unexpected "variable value is not an expression"
                  in
                  let var =
                    Global_var.{ symbol = name; type_; value; location }

@@ -113,7 +113,8 @@ let as_bool sym =
   | 1 -> true
   | 0 -> false
   | _ ->
-      Gerror.fail ~irep:sym.value "Invalid boolean when building machine model!"
+      Gerror.unexpected ~irep:sym.value
+        "Invalid boolean when building machine model!"
 
 let as_string (sym : Symbol.t) =
   let ops = sym.value.sub in
@@ -140,7 +141,7 @@ let consume_from_symtab (symtab : Symtab.t) =
                match as_int sym with
                | 2 -> true
                | 1 -> false
-               | _ -> Gerror.fail ~irep:sym.value "Invalid endianness"
+               | _ -> Gerror.unexpected ~irep:sym.value "Invalid endianness"
              in
              builder.is_big_endian <- Some be;
              None

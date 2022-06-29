@@ -3,12 +3,12 @@ let lift_option f (irep : Irep.t) =
   | Nil -> None
   | _ -> Some (f irep)
 
-let exactly_one ~failwith ?(msg = "") l =
-  match l with
+let exactly_one ?(msg = "") (irep : Irep.t) =
+  match irep.sub with
   | [ a ] -> a
-  | _ -> failwith (msg ^ " does not have exactly one sub")
+  | _ -> Gerror.unexpected ~irep (msg ^ " does not have exactly one sub")
 
-let exactly_two ~failwith ?(msg = "") l =
-  match l with
+let exactly_two ?(msg = "") (irep : Irep.t) =
+  match irep.sub with
   | [ a; b ] -> (a, b)
-  | _ -> failwith (msg ^ " does not have exactly two subs")
+  | _ -> Gerror.unexpected ~irep (msg ^ " does not have exactly two subs")

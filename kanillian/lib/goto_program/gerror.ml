@@ -1,14 +1,35 @@
-exception Lift_error of Irep.t option * string
+exception Unexpected_irep of Irep.t option * string
+exception Unhandled_irep of Irep.t option * string
+exception Code_error of Irep.t option * string
 
 let () =
   Printexc.register_printer (function
-    | Lift_error (irep, msg) ->
+    | Unexpected_irep (irep, msg) ->
         let json =
           match irep with
           | None -> ""
           | Some irep -> Irep.to_yojson irep |> Yojson.Safe.pretty_to_string
         in
-        Some (Fmt.str "Error in irep translation:\n%s\n\n%s" msg json)
+        Some (Fmt.str "Unexpected Irep:\n%s\n\n%s" msg json)
+    | Unhandled_irep (irep, msg) ->
+        let json =
+          match irep with
+          | None -> ""
+          | Some irep -> Irep.to_yojson irep |> Yojson.Safe.pretty_to_string
+        in
+        Some (Fmt.str "Irep not handled yet:\n%s\n\n%s" msg json)
+    | Code_error (irep, msg) ->
+        let json =
+          match irep with
+          | None -> ""
+          | Some irep ->
+              Fmt.str "\n\nHappened while handling this irep:\n%a"
+                (Yojson.Safe.pretty_print ~std:false)
+                (Irep.to_yojson irep)
+        in
+        Some (Fmt.str "There seem to be a bug in Kanillain: %s.%s" msg json)
     | _ -> None)
 
-let fail ?irep msg = raise (Lift_error (irep, msg))
+let unexpected ?irep msg = raise (Unexpected_irep (irep, msg))
+let unhandled ?irep msg = raise (Unhandled_irep (irep, msg))
+let code_error ?irep msg = raise (Code_error (irep, msg))

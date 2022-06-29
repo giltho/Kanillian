@@ -111,9 +111,6 @@ module IntType : sig
 
   val which_int_type_opt :
     machine:Machine_model.t -> signed:bool -> width:int -> t option
-
-  (* Fails if not found *)
-  val which_int_type : machine:Machine_model.t -> signed:bool -> width:int -> t
 end
 
 module rec Param : sig

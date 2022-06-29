@@ -28,7 +28,7 @@ let of_irep (irep : Irep.t) : t =
           let line = Option.map Irep.as_just_int (irep $? Line) in
           let col = Option.map Irep.as_just_int (irep $? Column) in
           make ~source ?line ?col irep.unique_id)
-  | _ -> Gerror.fail ~irep "wrong Irep location"
+  | _ -> Gerror.unexpected ~irep "wrong Irep location"
 
 let sloc_in_irep irep =
   let open Irep.Infix in

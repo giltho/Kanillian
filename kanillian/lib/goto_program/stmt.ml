@@ -38,11 +38,12 @@ let rec pp ft (t : t) =
 (** Lifting from Irep *)
 open Irep.Infix
 
+open Lift_utils
+
 let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
   let of_irep = of_irep ~machine in
   let expr_of_irep = Expr.of_irep ~machine in
-  let exactly_two = Lift_utils.exactly_two ~failwith in
-  let failwith = Gerror.fail ~irep in
+  let unexpected = Gerror.unexpected ~irep in
   match (irep $ Statement).id with
   | Skip -> Skip
   | Goto ->
@@ -60,61 +61,42 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
         match irep.sub with
         | [ a; b ] -> (expr_of_irep a, Lift_utils.lift_option expr_of_irep b)
         | [ a ] -> (expr_of_irep a, None)
-        | _ -> failwith "Invalid declaration statement!"
+        | _ -> unexpected "Invalid declaration statement!"
       in
       Decl { lhs; value }
   | Assign ->
-      let lhs, rhs =
-        match irep.sub with
-        | [ a; b ] -> (expr_of_irep a, expr_of_irep b)
-        | _ -> failwith "Assign stmt doesn't have two operands"
-      in
-      Assign { lhs; rhs }
+      let lhs, rhs = exactly_two ~msg:"Assign stmt" irep in
+      Assign { lhs = expr_of_irep lhs; rhs = expr_of_irep rhs }
   | Assume ->
-      let to_assume =
-        match irep.sub with
-        | [ a ] -> expr_of_irep a
-        | _ -> failwith "Assume that doesn't have one operand"
-      in
-      Assume { cond = to_assume }
+      let to_assume = exactly_one ~msg:"Assume stmt" irep in
+      Assume { cond = expr_of_irep to_assume }
   | Assert ->
       (* I might need to extract the property_class/msg here too *)
-      let to_assert =
-        match irep.sub with
-        | [ a ] -> expr_of_irep a
-        | _ -> failwith "Assert that doesn't have one operand"
-      in
-      Assume { cond = to_assert }
+      let to_assert = exactly_one ~msg:"Assert stmt" irep in
+      Assume { cond = expr_of_irep to_assert }
   | Return ->
       let ret_value_irep =
         match irep.sub with
         | [] -> Irep.nil
         | [ r ] -> r
-        | _ -> failwith "more than one return value"
+        | _ -> unexpected "more than one return value"
       in
       let ret_val = Lift_utils.lift_option expr_of_irep ret_value_irep in
       Return ret_val
   | Expression ->
-      let irep_expr =
-        match irep.sub with
-        | [ e ] -> e
-        | _ ->
-            failwith
-              "Don't know what it means to not have just one irep in statement \
-               expression"
-      in
+      let irep_expr = exactly_one ~msg:"Expression stmt" irep in
       Expression (expr_of_irep irep_expr)
   | Switch ->
-      let control, content = exactly_two ~msg:"Switch" irep.sub in
+      let control, content = exactly_two ~msg:"Switch" irep in
       let control = expr_of_irep control in
       let () =
         match (content $ Statement).id with
         | Block -> ()
-        | _ -> failwith "Switch body is not a block"
+        | _ -> unexpected "Switch body is not a block"
       in
       let cases, default = switch_cases_of_irep ~machine content.sub in
       Switch { control; cases; default }
-  | _ -> failwith "unhandled statement"
+  | _ -> Gerror.unhandled ~irep "statement"
 
 and switch_cases_of_irep ~machine l =
   let is_default irep =
@@ -124,30 +106,29 @@ and switch_cases_of_irep ~machine l =
   in
   match l with
   | [] -> ([], None)
-  | a :: r when is_default a -> (
-      let exactly_two = Lift_utils.exactly_two ~failwith in
-      let failwith = Gerror.fail ~irep:a in
+  | irep :: r when is_default irep -> (
+      let unexpected = Gerror.unexpected ~irep in
       let () =
-        match (a $ Statement).id with
+        match (irep $ Statement).id with
         | SwitchCase -> ()
         | _ ->
-            failwith "Switch body contains something that is not a switch case"
+            unexpected
+              "Switch body contains something that is not a switch case"
       in
-      let _, stmt = exactly_two ~msg:"default switch_case" a.sub in
+      let _, stmt = exactly_two ~msg:"default switch_case" irep in
       match switch_cases_of_irep ~machine r with
       | rest, None -> (rest, Some (of_irep ~machine stmt))
-      | _, Some _ -> failwith "two default switch_cases!")
-  | a :: r ->
-      let exactly_two = Lift_utils.exactly_two ~failwith in
-      let failwith = Gerror.fail ~irep:a in
+      | _, Some _ -> unexpected "two default switch_cases!")
+  | irep :: r ->
       let () =
-        match (a $ Statement).id with
+        match (irep $ Statement).id with
         | SwitchCase -> ()
         | _ ->
-            failwith "Switch body contains something that is not a switch case"
+            Gerror.unexpected ~irep
+              "Switch body contains something that is not a switch case"
       in
       let cases, default = switch_cases_of_irep ~machine r in
-      let case, body = exactly_two a.sub in
+      let case, body = exactly_two irep in
       let case = Expr.of_irep ~machine case in
       let sw_body = of_irep ~machine body in
       ({ case; sw_body } :: cases, default)

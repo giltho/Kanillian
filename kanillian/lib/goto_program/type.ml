@@ -39,11 +39,12 @@ let size_of_irep irep =
 let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let of_irep = of_irep ~machine in
   let datatype_component_of_irep = datatype_component_of_irep ~machine in
-  let failwith = Gerror.fail ~irep in
+  (* let unhandled = Gerror.unhandled ~irep in *)
+  let unexpected = Gerror.unexpected ~irep in
   let ( $ ) irep name =
     match irep $? name with
     | Some e -> e
-    | None -> failwith ("Couldn't find " ^ Id.to_string name)
+    | None -> unexpected ("Couldn't find " ^ Id.to_string name)
   in
   match irep.id with
   | Array ->
@@ -52,12 +53,15 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
       Array (elem_ty, sz)
   | Bool -> Bool
   | Floatbv -> (
-      (* TODO: there should probably be a check about the width or something.
-         Maybe it should be obtained from the width and not that weird f field *)
-      match irep $ F |> Irep.as_just_int with
-      | 23 -> Float
-      | 52 -> Double
-      | _ -> failwith "unsupported floatbv kind")
+      match
+        (irep $ Width |> Irep.as_just_int, irep $ F |> Irep.as_just_int)
+      with
+      | 32, 23 -> Float
+      | 64, 52 -> Double
+      | _ ->
+          unexpected
+            "Float bitvector doesn't correspond to standard 32bit or 64bit \
+             float")
   | CBool -> CInteger I_bool
   | Unsignedbv -> (
       let width = irep $ Width |> Irep.as_just_int in
