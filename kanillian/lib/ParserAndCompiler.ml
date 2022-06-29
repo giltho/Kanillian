@@ -2,7 +2,10 @@ open Gillian
 module CP = Cgil_lib.ParserAndCompiler
 
 let initialize _ = CP.init_compcert ()
-let env_var_import_path = Some Kconstants.Imports.env_path_var
+
+let env_var_import_path =
+  Some Kanillian_compiler.Kconstants.Imports.env_path_var
+
 let other_imports = []
 
 type tl_ast = Program.t
@@ -59,6 +62,7 @@ let create_compilation_result path goto_prog gil_prog =
   { gil_progs = [ (gil_path, gil_prog) ]; source_files; tl_ast = goto_prog }
 
 let parse_and_compile_files files =
+  let open Kanillian_compiler in
   let open Utils.Syntaxes.Result in
   let f files =
     let path =
@@ -67,7 +71,8 @@ let parse_and_compile_files files =
       | _ -> failwith "Kanillian only handles one symtab file at the moment"
     in
     let+ goto_prog = parse_symtab_into_goto path in
-    let gil_prog = Gotoc_to_gil.compile goto_prog in
+    let context = Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog () in
+    let gil_prog = Compile.compile context in
     create_compilation_result path goto_prog gil_prog
   in
   f files

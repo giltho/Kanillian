@@ -174,7 +174,6 @@ module Expr : sig
     | Struct of t list
     | Member of { lhs : t; field : string }
     | AddressOf of t
-    | AddressOfSymbol of string
     | Index of { array : t; index : t }
     | StringConstant of string
     | TypeCast of t
@@ -257,7 +256,7 @@ module Visitors : sig
       method visit_int_type : ctx:'a -> IntType.t -> unit
       method visit_datatype_components : ctx:'a -> Datatype_component.t -> unit
       method visit_type : ctx:'a -> Type.t -> unit
-      method visit_expr_value : ctx:'a -> Expr.value -> unit
+      method visit_expr_value : ctx:'a -> type_:Type.t -> Expr.value -> unit
       method visit_expr : ctx:'a -> Expr.t -> unit
       method visit_stmt_body : ctx:'a -> Stmt.body -> unit
       method visit_stmt : ctx:'a -> Stmt.t -> unit
@@ -271,7 +270,10 @@ module Visitors : sig
         ctx:'a -> Datatype_component.t -> Datatype_component.t
 
       method visit_expr : ctx:'a -> Expr.t -> Expr.t
-      method visit_expr_value : ctx:'a -> Expr.value -> Expr.value
+
+      method visit_expr_value :
+        ctx:'a -> type_:Type.t -> Expr.value -> Expr.value
+
       method visit_int_type : ctx:'a -> IntType.t -> IntType.t
       method visit_location : ctx:'a -> Location.t -> Location.t
       method visit_selfop : ctx:'a -> Ops.Self.t -> Ops.Self.t

@@ -1,7 +1,7 @@
 open Gil_syntax
 module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
-module Hashset = Utils.Prelude.Hashset
+open Gillian.Utils.Prelude
 
 exception CompilationError of string
 
@@ -29,28 +29,40 @@ let () =
         Some ("Error happened while compiling from GotoC to Gil:\n\n" ^ msg)
     | _ -> None)
 
-let addressed_symbols =
-  (* Actually, this is probably wrong?
-     If there's two derefs.. I'm not sure what can
-     be done here. *)
+let symbols_in_memory ~prog =
+  let representable_in_store (type_ : GType.t) =
+    match type_ with
+    | Bool
+    | CInteger _
+    | Float
+    | Double
+    | Signedbv _
+    | Unsignedbv _
+    | Pointer _
+    | Empty -> true
+    | _ -> Program.is_zst ~prog type_
+  in
   let symbol_collector =
     object
       inherit [string Hashset.t] Goto_lib.Visitors.iter as super
 
-      method! visit_expr_value ~ctx (e : GExpr.value) =
+      method! visit_expr_value ~ctx ~type_ (e : GExpr.value) =
         match e with
         | Symbol s -> Hashset.add ctx s
-        | _ -> super#visit_expr_value ~ctx e
+        | _ -> super#visit_expr_value ~ctx ~type_ e
     end
   in
   let addressed_visitor =
     object
       inherit [string Hashset.t] Goto_lib.Visitors.iter as super
 
-      method! visit_expr_value ~ctx (e : GExpr.value) =
+      method! visit_expr_value ~ctx ~type_ (e : GExpr.value) =
         match e with
-        | AddressOf e -> symbol_collector#visit_expr ~ctx e
-        | _ -> super#visit_expr_value ~ctx e
+        | Member { lhs = e; _ } | Index { array = e; _ } | AddressOf e ->
+            symbol_collector#visit_expr ~ctx e;
+            super#visit_expr ~ctx e
+        | Symbol x when not (representable_in_store type_) -> Hashset.add ctx x
+        | _ -> super#visit_expr_value ~ctx ~type_ e
     end
   in
   fun ?(set = Hashset.empty ()) e -> addressed_visitor#visit_expr ~ctx:set e
@@ -103,9 +115,14 @@ module Body_item = struct
     (annot, label, cmd)
 end
 
-let call_for_binop ~(lty : IntType.t) (binop : Ops.Binary.t) e1 e2 =
+let call_for_binop
+    ~(ctx : Ctx.t)
+    ~(lty : IntType.t)
+    (binop : Ops.Binary.t)
+    e1
+    e2 =
   (* For now, we assume we're on archi64 exactly, then we'll figure out a bit more *)
-  assert (Machine_model.equal Machine_model.archi64 !Kconfig.machine_model);
+  assert (Machine_model.equal Machine_model.archi64 ctx.machine);
   let internal_function =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
     let open! Kconstants.Comp_functions in
@@ -242,7 +259,9 @@ let compile_cast ~(from : GType.t) ~(into : GType.t) e =
         (Printf.sprintf "Cannot perform cast yet from %s into %s"
            (GType.show from) (GType.show into))
 
-let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
+let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
+    =
+  let compile_expr = compile_expr ~ctx in
   let loc = compile_location expr.location in
   let id = expr.location.origin_id in
   let b = Body_item.make ~loc ~id in
@@ -262,7 +281,7 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
         match int_ty with
         | I_int | I_char -> Vint cz
         | I_size_t -> (
-            match !Kconfig.machine_model.pointer_width with
+            match ctx.machine.pointer_width with
             | 32 -> Vint cz
             | 64 -> Vlong cz
             | _ -> failwith "Gillian only handles archi 32 and archi 64 for now"
@@ -277,7 +296,7 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       let s1, e1 = compile_expr lhs in
       let s2, e2 = compile_expr rhs in
       let lty = lhs.type_ |> GType.as_int_type in
-      let call, e = call_for_binop ~lty op e1 e2 in
+      let call, e = call_for_binop ~ctx ~lty op e1 e2 in
       (s1 @ s2 @ [ b call ], e)
   | UnOp { op; e } ->
       let s, e = compile_expr e in
@@ -386,7 +405,9 @@ let rec compile_expr (expr : GExpr.t) : Body_item.t list * Expr.t =
       (pre @ [ b perform_cast ], out)
   | _ -> failwith ("Cannot compile expr yet: " ^ GExpr.show expr)
 
-let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
+let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
+  let compile_statement = compile_statement ~ctx in
+  let compile_expr = compile_expr ~ctx in
   let loc = compile_location stmt.location in
   let id = stmt.location.origin_id in
   let b = Body_item.make ~loc ~id in
@@ -444,7 +465,7 @@ let rec compile_statement (stmt : Stmt.t) : Body_item.t list =
   | Switch _ -> failwith "Cannot compile switch statement yet"
 (* | _ -> failwith "Cannot compile statement yet" *)
 
-let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
+let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let f_loc = compile_location func.location in
   let body =
     match func.body with
@@ -469,7 +490,7 @@ let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
       func.params
   in
   let proc_spec = None in
-  let proc_body = Array.of_list (compile_statement body) in
+  let proc_body = Array.of_list (compile_statement ~ctx body) in
   Proc.
     {
       proc_name = func.symbol;
@@ -480,7 +501,8 @@ let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
       proc_spec;
     }
 
-let compile (program : Program.t) : (Annot.t, string) Prog.t =
+let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
+  let program = context.prog in
   Printf.printf "%d types; %d global variables; %d functions\n"
     (Hashtbl.length program.types)
     (Hashtbl.length program.vars)
@@ -490,10 +512,10 @@ let compile (program : Program.t) : (Annot.t, string) Prog.t =
   let gil_prog = Prog.create () in
   let gil_prog =
     Program.fold_functions
-      (fun _ f prog -> Prog.add_proc prog (compile_function f))
+      (fun _ f prog -> Prog.add_proc prog (compile_function ~ctx:context f))
       program gil_prog
   in
-  assert (Machine_model.equal !Kconfig.machine_model Machine_model.archi64);
+  assert (Machine_model.equal context.machine Machine_model.archi64);
   let imports =
     Kconstants.Imports.imports
     @ Cgil_lib.CConstants.Imports.imports Arch64

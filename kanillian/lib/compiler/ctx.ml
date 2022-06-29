@@ -1,3 +1,5 @@
+open Gillian.Utils.Prelude
+
 module Generators = struct
   let temp_var () =
     let id = ref 0 in
@@ -17,14 +19,18 @@ module Generators = struct
 end
 
 type t = {
+  machine : Machine_model.t;
   prog : Program.t;
   fresh_v : unit -> string;
   fresh_lv : unit -> string;
   locals : Utils.Containers.SS.t;
+  in_memory : string Hashset.t;
 }
 
-let make ~prog () =
+let make ~machine ~prog () =
   {
+    in_memory = Hashset.empty ();
+    machine;
     prog;
     fresh_v = (fun () -> failwith "uninitialized var generator");
     fresh_lv = (fun () -> failwith "uninitialized lvar generator");

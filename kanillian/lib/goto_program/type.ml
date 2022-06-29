@@ -23,6 +23,10 @@ let is_function = function
   | Code _ -> true (* Will also be true for variadic code if ever *)
   | _ -> false
 
+let is_zst = function
+  | Empty -> true
+  | _ -> false
+
 open Irep.Infix
 
 (** This feels a bit hacky, maybe the constant-deserialization

@@ -47,7 +47,7 @@ class ['a] iter =
       | UnionTag _
       | IncompleteStruct _ -> ()
 
-    method visit_expr_value ~(ctx : 'a) (ev : Expr.value) =
+    method visit_expr_value ~(ctx : 'a) ~type_:_ (ev : Expr.value) =
       match ev with
       | Array l | Struct l -> List.iter (self#visit_expr ~ctx) l
       | FunctionCall { func; args } ->
@@ -66,7 +66,6 @@ class ['a] iter =
           self#visit_expr ~ctx array;
           self#visit_expr ~ctx index
       | Member { lhs; _ } -> self#visit_expr ~ctx lhs
-      | AddressOfSymbol _
       | Nondet
       | Symbol _
       | IntConstant _
@@ -77,7 +76,7 @@ class ['a] iter =
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
       self#visit_location ~ctx e.location;
-      self#visit_expr_value ~ctx e.value;
+      self#visit_expr_value ~ctx ~type_:e.type_ e.value;
       self#visit_type ~ctx e.type_
 
     method visit_stmt_body ~(ctx : 'a) (body : Stmt.body) =
@@ -202,7 +201,7 @@ class ['a] map =
       | UnionTag _
       | IncompleteStruct _ -> type_
 
-    method visit_expr_value ~(ctx : 'a) (ev : Expr.value) =
+    method visit_expr_value ~(ctx : 'a) ~type_:_ (ev : Expr.value) =
       match ev with
       | Array l ->
           let changed = ref false in
@@ -251,7 +250,6 @@ class ['a] map =
       | Member { lhs; field } ->
           let new_lhs = self#visit_expr ~ctx lhs in
           if new_lhs == lhs then ev else Member { lhs = new_lhs; field }
-      | AddressOfSymbol _
       | Nondet
       | Symbol _
       | IntConstant _
@@ -261,7 +259,7 @@ class ['a] map =
       | StringConstant _ -> ev
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
-      let new_value = self#visit_expr_value ~ctx e.value in
+      let new_value = self#visit_expr_value ~ctx ~type_:e.type_ e.value in
       let new_location = self#visit_location ~ctx e.location in
 
       let new_type = self#visit_type ~ctx e.type_ in

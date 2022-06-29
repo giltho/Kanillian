@@ -13,7 +13,6 @@ type value =
   | Struct of t list
   | Member of { lhs : t; field : string }
   | AddressOf of t
-  | AddressOfSymbol of string
   | Index of { array : t; index : t }
   | StringConstant of string
   | TypeCast of t
@@ -28,7 +27,6 @@ let pp ft t =
     match t.value with
     | Array x -> pf ft "%a" (list ~sep:comma pp) x
     | IntConstant z -> pf ft "%a" Z.pp_print z
-    | AddressOfSymbol s -> pf ft "&%s" s
     | CBoolConstant b -> pf ft "%d" (if b then 1 else 0)
     | PointerConstant 0 -> pf ft "NULL"
     | PointerConstant k -> pf ft "POINTER(%d)" k
