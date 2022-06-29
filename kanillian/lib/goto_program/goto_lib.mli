@@ -101,8 +101,6 @@ end
 module IntType : sig
   type t = I_bool | I_char | I_int | I_size_t | I_ssize_t [@@deriving show]
 
-  val pp : Format.formatter -> t -> unit
-
   module Bv_encoding : sig
     type int_type = t
     type t = { signed : bool; width : int }
@@ -158,7 +156,6 @@ and Type : sig
   val is_function : t -> bool
   val as_int_type : t -> IntType.t
   val of_irep : machine:Machine_model.t -> Irep.t -> t
-  val pp : Format.formatter -> t -> unit
 end
 
 module Expr : sig
@@ -177,6 +174,7 @@ module Expr : sig
     | Struct of t list
     | Member of { lhs : t; field : string }
     | AddressOf of t
+    | AddressOfSymbol of string
     | Index of { array : t; index : t }
     | StringConstant of string
     | TypeCast of t
@@ -208,7 +206,7 @@ module Stmt : sig
     | Expression of Expr.t
     | Return of Expr.t option
 
-  and switch_case = { case : Expr.t; body : t }
+  and switch_case = { case : Expr.t; sw_body : t }
   and t = { location : Location.t; body : body }
 
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body
@@ -263,5 +261,23 @@ module Visitors : sig
       method visit_expr : ctx:'a -> Expr.t -> unit
       method visit_stmt_body : ctx:'a -> Stmt.body -> unit
       method visit_stmt : ctx:'a -> Stmt.t -> unit
+    end
+
+  class ['a] map :
+    object
+      method visit_binop : ctx:'a -> Ops.Binary.t -> Ops.Binary.t
+
+      method visit_datatype_components :
+        ctx:'a -> Datatype_component.t -> Datatype_component.t
+
+      method visit_expr : ctx:'a -> Expr.t -> Expr.t
+      method visit_expr_value : ctx:'a -> Expr.value -> Expr.value
+      method visit_int_type : ctx:'a -> IntType.t -> IntType.t
+      method visit_location : ctx:'a -> Location.t -> Location.t
+      method visit_selfop : ctx:'a -> Ops.Self.t -> Ops.Self.t
+      method visit_stmt : ctx:'a -> Stmt.t -> Stmt.t
+      method visit_stmt_body : ctx:'a -> Stmt.body -> Stmt.body
+      method visit_type : ctx:'a -> Type.t -> Type.t
+      method visit_unop : ctx:'a -> Ops.Unary.t -> Ops.Unary.t
     end
 end

@@ -1,6 +1,7 @@
 open Gil_syntax
 module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
+module Hashset = Utils.Prelude.Hashset
 
 exception CompilationError of string
 
@@ -27,6 +28,32 @@ let () =
     | CompilationError msg ->
         Some ("Error happened while compiling from GotoC to Gil:\n\n" ^ msg)
     | _ -> None)
+
+let addressed_symbols =
+  (* Actually, this is probably wrong?
+     If there's two derefs.. I'm not sure what can
+     be done here. *)
+  let symbol_collector =
+    object
+      inherit [string Hashset.t] Goto_lib.Visitors.iter as super
+
+      method! visit_expr_value ~ctx (e : GExpr.value) =
+        match e with
+        | Symbol s -> Hashset.add ctx s
+        | _ -> super#visit_expr_value ~ctx e
+    end
+  in
+  let addressed_visitor =
+    object
+      inherit [string Hashset.t] Goto_lib.Visitors.iter as super
+
+      method! visit_expr_value ~ctx (e : GExpr.value) =
+        match e with
+        | AddressOf e -> symbol_collector#visit_expr ~ctx e
+        | _ -> super#visit_expr_value ~ctx e
+    end
+  in
+  fun ?(set = Hashset.empty ()) e -> addressed_visitor#visit_expr ~ctx:set e
 
 let failwith msg = raise (CompilationError msg)
 
@@ -139,7 +166,51 @@ let assume_type (type_ : GType.t) (lvar : string) =
       in
       let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
       [ assume_list; assume_int ]
-  | _ -> failwith ("unhandled nondet for type: " ^ GType.show type_)
+  | Double ->
+      let open Cgil_lib.CConstants.VTypes in
+      let value = temp_lvar () in
+      let e_value = Expr.LVar value in
+      let assume_list =
+        let f =
+          Formula.Eq (llvar, EList [ Lit (String float_type); e_value ])
+        in
+        Cmd.Logic (Assume f)
+      in
+      let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
+      [ assume_list; assume_num ]
+  | Float ->
+      let open Cgil_lib.CConstants.VTypes in
+      let value = temp_lvar () in
+      let e_value = Expr.LVar value in
+      let assume_list =
+        let f =
+          Formula.Eq (llvar, EList [ Lit (String single_type); e_value ])
+        in
+        Cmd.Logic (Assume f)
+      in
+      let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
+      [ assume_list; assume_num ]
+  | Pointer _ ->
+      let loc = temp_lvar () in
+      let ofs = temp_lvar () in
+      let e_loc = Expr.LVar loc in
+      let e_ofs = Expr.LVar ofs in
+      let assume_list =
+        let f = Formula.Eq (llvar, EList [ e_loc; e_ofs ]) in
+        Cmd.Logic (Assume f)
+      in
+      let assume_obj = Cmd.Logic (AssumeType (loc, ObjectType)) in
+      let assume_int = Cmd.Logic (AssumeType (ofs, IntType)) in
+      [ assume_list; assume_obj; assume_int ]
+  | StructTag tag | UnionTag tag | Struct { tag; _ } | Union { tag; _ } ->
+      (* TODO: Add a signal here for something unhandled! *)
+      let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String tag) ]) in
+      [ fail ]
+  | _ ->
+      let fail =
+        Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String "Something else") ])
+      in
+      [ fail ]
 
 let nondet_expr ~add_annot ~type_ () =
   let is_symbolic_exec =
@@ -390,7 +461,12 @@ let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
   let proc_params =
-    List.map (fun x -> Option.get x.Param.identifier) func.params
+    List.map
+      (fun x ->
+        match x.Param.identifier with
+        | None -> temp_var ()
+        | Some s -> s)
+      func.params
   in
   let proc_spec = None in
   let proc_body = Array.of_list (compile_statement body) in
@@ -405,8 +481,13 @@ let compile_function (func : Program.Func.t) : (Annot.t, string) Proc.t =
     }
 
 let compile (program : Program.t) : (Annot.t, string) Prog.t =
+  Printf.printf "%d types; %d global variables; %d functions\n"
+    (Hashtbl.length program.types)
+    (Hashtbl.length program.vars)
+    (Hashtbl.length program.funs);
+  let to_compile = Queue.create () in
+  Queue.push "main" to_compile;
   let gil_prog = Prog.create () in
-
   let gil_prog =
     Program.fold_functions
       (fun _ f prog -> Prog.add_proc prog (compile_function f))

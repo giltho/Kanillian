@@ -192,5 +192,5 @@ let consume_from_symtab (symtab : Symtab.t) =
          | "__CPROVER_architecture_single_width" ->
              builder.single_width <- Some (as_int sym);
              None
-         | x -> Some sym);
+         | _ -> Some sym);
   build builder

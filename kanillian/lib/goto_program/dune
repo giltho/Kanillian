@@ -1,7 +1,7 @@
 (library
  (name goto_lib)
  (libraries irep_lib zarith)
- (flags -open Irep_lib)
+ (flags :standard -open Irep_lib)
  (preprocess
   (pps ppx_deriving.std)))
 

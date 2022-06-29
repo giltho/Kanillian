@@ -13,6 +13,7 @@ type value =
   | Struct of t list
   | Member of { lhs : t; field : string }
   | AddressOf of t
+  | AddressOfSymbol of string
   | Index of { array : t; index : t }
   | StringConstant of string
   | TypeCast of t
@@ -21,15 +22,48 @@ type value =
 and t = { value : value; type_ : Type.t; location : Location.t }
 [@@deriving show { with_path = false }]
 
+let pp ft t =
+  let rec pp ft t =
+    let open Fmt in
+    match t.value with
+    | Array x -> pf ft "%a" (list ~sep:comma pp) x
+    | IntConstant z -> pf ft "%a" Z.pp_print z
+    | AddressOfSymbol s -> pf ft "&%s" s
+    | CBoolConstant b -> pf ft "%d" (if b then 1 else 0)
+    | PointerConstant 0 -> pf ft "NULL"
+    | PointerConstant k -> pf ft "POINTER(%d)" k
+    | Symbol s -> pf ft "%s" s
+    | FunctionCall { func; args } ->
+        pf ft "%a(%a)" pp func (list ~sep:comma pp) args
+    | BinOp { op; lhs; rhs } ->
+        pf ft "(%a %a %a)" pp lhs Ops.Binary.pp op pp rhs
+    | UnOp { op; e } -> pf ft "(%a %a)" Ops.Unary.pp op pp e
+    | ByteExtract { e; offset } ->
+        pf ft "EXTRACT(%a, %a, %d)" pp e Type.pp t.type_ offset
+    | Struct xs -> pf ft "{ %a }" (list ~sep:semi pp) xs
+    | Member { lhs; field } -> pf ft "%a.%s" pp lhs field
+    | Index { array; index } -> pf ft "%a[%a]" pp array pp index
+    | StringConstant s -> pf ft "\"%s\"" s
+    | TypeCast value -> pf ft "((%a) %a)" Type.pp t.type_ pp value
+    | Nondet -> pf ft "NONDET"
+    | BoolConstant b -> pf ft "%b" b
+    | AddressOf e -> pf ft "&%a" pp e
+    | Dereference e -> pf ft "*%a" pp e
+  in
+
+  (Fmt.hbox pp) ft t
+
+let show = Fmt.to_to_string pp
+
 let as_symbol e =
   match e.value with
   | Symbol s -> s
   | _ -> Gerror.fail "Expected a symbol, got something else!"
 
-(** Lifting from Irep *)
 open Irep.Infix
 
-let rec byte_extract ~(machine : Machine_model.t) irep =
+(** Lifting from Irep *)
+let rec byte_extract_of_irep ~(machine : Machine_model.t) irep =
   let e, offset =
     Lift_utils.exactly_two ~failwith:(Gerror.fail ~irep) irep.sub
   in
@@ -116,9 +150,9 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
       | _ -> failwith "Cannot handle this constant of this type yet")
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->
-      byte_extract ~machine irep
+      byte_extract_of_irep ~machine irep
   | ByteExtractLittleEndian when not machine.is_big_endian ->
-      byte_extract ~machine irep
+      byte_extract_of_irep ~machine irep
   | Symbol ->
       let name = irep $ Identifier |> Irep.as_just_string in
       Symbol name

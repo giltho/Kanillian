@@ -11,10 +11,29 @@ type body =
   | Expression of Expr.t
   | Return of Expr.t option
 
-and switch_case = { case : Expr.t; body : t }
-
+and switch_case = { case : Expr.t; sw_body : t }
 and t = { location : Location.t; body : body }
-[@@deriving show { with_path = false }]
+
+let rec pp ft (t : t) =
+  let open Fmt in
+  match t.body with
+  | Decl { lhs; value } ->
+      pf ft "@[<h>%a %a%a;@]" Type.pp lhs.type_ Expr.pp lhs
+        (fun ft -> function
+          | None -> ()
+          | Some e -> pf ft " = %a" Expr.pp e)
+        value
+  | Assign { lhs; rhs } -> pf ft "@[<h>%a = %a;@]" Expr.pp lhs Expr.pp rhs
+  | Assume { cond } -> pf ft "@[<h>assume(%a);@]" Expr.pp cond
+  | Assert { cond } -> pf ft "@[<h>assert(%a);@]" Expr.pp cond
+  | Block body -> pf ft "@[<v 3>{ %a };@]" (Fmt.list ~sep:cut pp) body
+  | Label (label, body) ->
+      pf ft "@[<v 3>%s: {@.%a};@]" label (Fmt.list ~sep:cut pp) body
+  | Skip -> pf ft "skip;"
+  | Expression e -> pf ft "@[<v 3>{ %a };@]" Expr.pp e
+  | Return e -> pf ft "@[<v 3>return %a;@]" (option Expr.pp) e
+  | Goto label -> pf ft "@[<v 3>goto %s;@]" label
+  | Switch _ -> pf ft "switch"
 
 (** Lifting from Irep *)
 open Irep.Infix
@@ -130,8 +149,8 @@ and switch_cases_of_irep ~machine l =
       let cases, default = switch_cases_of_irep ~machine r in
       let case, body = exactly_two a.sub in
       let case = Expr.of_irep ~machine case in
-      let body = of_irep ~machine body in
-      ({ case; body } :: cases, default)
+      let sw_body = of_irep ~machine body in
+      ({ case; sw_body } :: cases, default)
 
 and of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let location = Location.sloc_in_irep irep in
