@@ -3,44 +3,6 @@ module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
 open Gillian.Utils.Prelude
 
-let symbols_in_memory ~prog =
-  let representable_in_store (type_ : GType.t) =
-    match type_ with
-    | Bool
-    | CInteger _
-    | Float
-    | Double
-    | Signedbv _
-    | Unsignedbv _
-    | Pointer _
-    | Empty -> true
-    | _ -> Program.is_zst ~prog type_
-  in
-  let symbol_collector =
-    object
-      inherit [string Hashset.t] Goto_lib.Visitors.iter as super
-
-      method! visit_expr_value ~ctx ~type_ (e : GExpr.value) =
-        match e with
-        | Symbol s -> Hashset.add ctx s
-        | _ -> super#visit_expr_value ~ctx ~type_ e
-    end
-  in
-  let addressed_visitor =
-    object
-      inherit [string Hashset.t] Goto_lib.Visitors.iter as super
-
-      method! visit_expr_value ~ctx ~type_ (e : GExpr.value) =
-        match e with
-        | Member { lhs = e; _ } | Index { array = e; _ } | AddressOf e ->
-            symbol_collector#visit_expr ~ctx e;
-            super#visit_expr ~ctx e
-        | Symbol x when not (representable_in_store type_) -> Hashset.add ctx x
-        | _ -> super#visit_expr_value ~ctx ~type_ e
-    end
-  in
-  fun ?(set = Hashset.empty ()) e -> addressed_visitor#visit_expr ~ctx:set e
-
 let as_pure_string_literal (e : GExpr.t) =
   match e.value with
   | AddressOf
@@ -455,6 +417,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         in
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
+  let ctx = Ctx.with_in_memory ctx body in
   let proc_params =
     List.map
       (fun x ->
