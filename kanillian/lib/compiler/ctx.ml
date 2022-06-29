@@ -23,7 +23,6 @@ type t = {
   prog : Program.t;
   fresh_v : unit -> string;
   fresh_lv : unit -> string;
-  locals : Utils.Containers.SS.t;
   in_memory : string Hashset.t;
 }
 
@@ -34,7 +33,6 @@ let make ~machine ~prog () =
     prog;
     fresh_v = (fun () -> failwith "uninitialized var generator");
     fresh_lv = (fun () -> failwith "uninitialized lvar generator");
-    locals = Utils.Containers.SS.empty;
   }
 
 let with_new_generators t =
@@ -43,3 +41,6 @@ let with_new_generators t =
     fresh_v = Generators.temp_var ();
     fresh_lv = Generators.temp_lvar ();
   }
+
+let fresh_v t = t.fresh_v ()
+let fresh_lv t = t.fresh_lv ()

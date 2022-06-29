@@ -5,24 +5,6 @@ open Gillian.Utils.Prelude
 
 exception CompilationError of string
 
-(* TODO: Extract that and pass a context to every compile function
-   with the current current counter of variables etc... *)
-let temp_var =
-  let id = ref 0 in
-  fun () ->
-    let c = !id in
-    let ret = "temp__" ^ string_of_int c in
-    incr id;
-    ret
-
-let temp_lvar =
-  let id = ref 0 in
-  fun () ->
-    let c = !id in
-    let ret = "#lvar_" ^ string_of_int c in
-    incr id;
-    ret
-
 let () =
   Printexc.register_printer (function
     | CompilationError msg ->
@@ -153,7 +135,7 @@ let call_for_binop
         | I_ssize_t -> cmpl_ge)
     | _ -> failwith "Unhandled binary operator: " ^ Ops.Binary.show binop
   in
-  let gvar = temp_var () in
+  let gvar = Ctx.fresh_v ctx in
   let call =
     Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
   in
@@ -163,7 +145,7 @@ let is_assume_call f = String.equal (GExpr.as_symbol f) "__CPROVER_assume"
 let is_assert_call f = String.equal (GExpr.as_symbol f) "__CPROVER_assert"
 let is_nondet_call f = String.equal (GExpr.as_symbol f) "__nondet"
 
-let assume_type (type_ : GType.t) (lvar : string) =
+let assume_type ~ctx (type_ : GType.t) (lvar : string) =
   let llvar = Expr.LVar lvar in
   match type_ with
   | CInteger ty ->
@@ -173,7 +155,7 @@ let assume_type (type_ : GType.t) (lvar : string) =
         | I_int -> int_type
         | _ -> failwith ("unhandled nondet for int type: " ^ IntType.show ty)
       in
-      let value = temp_lvar () in
+      let value = Ctx.fresh_lv ctx in
       let e_value = Expr.LVar value in
       let assume_list =
         let f =
@@ -185,7 +167,7 @@ let assume_type (type_ : GType.t) (lvar : string) =
       [ assume_list; assume_int ]
   | Double ->
       let open Cgil_lib.CConstants.VTypes in
-      let value = temp_lvar () in
+      let value = Ctx.fresh_lv ctx in
       let e_value = Expr.LVar value in
       let assume_list =
         let f =
@@ -197,7 +179,7 @@ let assume_type (type_ : GType.t) (lvar : string) =
       [ assume_list; assume_num ]
   | Float ->
       let open Cgil_lib.CConstants.VTypes in
-      let value = temp_lvar () in
+      let value = Ctx.fresh_lv ctx in
       let e_value = Expr.LVar value in
       let assume_list =
         let f =
@@ -208,8 +190,8 @@ let assume_type (type_ : GType.t) (lvar : string) =
       let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
       [ assume_list; assume_num ]
   | Pointer _ ->
-      let loc = temp_lvar () in
-      let ofs = temp_lvar () in
+      let loc = Ctx.fresh_lv ctx in
+      let ofs = Ctx.fresh_lv ctx in
       let e_loc = Expr.LVar loc in
       let e_ofs = Expr.LVar ofs in
       let assume_list =
@@ -229,7 +211,7 @@ let assume_type (type_ : GType.t) (lvar : string) =
       in
       [ fail ]
 
-let nondet_expr ~add_annot ~type_ () =
+let nondet_expr ~ctx ~add_annot ~type_ () =
   let is_symbolic_exec =
     let open Gillian.Utils in
     ExecMode.symbolic_exec !Config.current_exec_mode
@@ -239,16 +221,16 @@ let nondet_expr ~add_annot ~type_ () =
       "Looks like you're compiling some nondet variables, but you're not in \
        concrete execution mode"
   else
-    let hash_x = temp_lvar () in
+    let hash_x = Ctx.fresh_lv ctx in
     let spec_var_cmd = Cmd.Logic (LCmd.SpecVar [ hash_x ]) in
-    let cmds = assume_type type_ hash_x in
+    let cmds = assume_type ~ctx type_ hash_x in
     let cmds = add_annot (spec_var_cmd :: cmds) in
     (cmds, Expr.LVar hash_x)
 
-let compile_cast ~(from : GType.t) ~(into : GType.t) e =
+let compile_cast ~ctx ~(from : GType.t) ~(into : GType.t) e =
   match (from, into) with
   | Bool, CInteger (I_bool | I_char | I_int) ->
-      let temp = temp_var () in
+      let temp = Ctx.fresh_v ctx in
       let value_of_bool =
         Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.val_of_bool)
       in
@@ -328,7 +310,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let pre, to_assert = compile_expr to_assert in
       let cast_call, to_assert =
         if cast_to_bool then
-          let temp = temp_var () in
+          let temp = Ctx.fresh_v ctx in
           let bool_of_value =
             Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
           in
@@ -362,7 +344,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
       let pre, to_assume = compile_expr to_assume in
       let cast_call, to_assume =
         if cast_to_bool then
-          let temp = temp_var () in
+          let temp = Ctx.fresh_v ctx in
           let bool_of_value =
             Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
           in
@@ -387,20 +369,20 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Body_item.t list * Expr.t
         | [] -> ()
         | _ -> failwith "You should not be passing arguments to __nondet!"
       in
-      nondet_expr ~add_annot ~type_:expr.type_ ()
-  | Nondet -> nondet_expr ~add_annot ~type_:expr.type_ ()
+      nondet_expr ~ctx ~add_annot ~type_:expr.type_ ()
+  | Nondet -> nondet_expr ~ctx ~add_annot ~type_:expr.type_ ()
   | FunctionCall { func; args } ->
       let fname = GExpr.as_symbol func in
 
       let ss, args = List.map compile_expr args |> List.split in
       let pre_cmd = List.concat ss in
-      let ret_var = temp_var () in
+      let ret_var = Ctx.fresh_v ctx in
       let gil_call = Cmd.Call (ret_var, Lit (String fname), args, None, None) in
       (pre_cmd @ [ b gil_call ], PVar ret_var)
   | TypeCast to_cast ->
       let pre, to_cast_e = compile_expr to_cast in
       let perform_cast, out =
-        compile_cast ~from:to_cast.type_ ~into:expr.type_ to_cast_e
+        compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
       in
       (pre @ [ b perform_cast ], out)
   | _ -> failwith ("Cannot compile expr yet: " ^ GExpr.show expr)
@@ -466,6 +448,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
 (* | _ -> failwith "Cannot compile statement yet" *)
 
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
+  let ctx = Ctx.with_new_generators ctx in
   let f_loc = compile_location func.location in
   let body =
     match func.body with
@@ -485,7 +468,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
     List.map
       (fun x ->
         match x.Param.identifier with
-        | None -> temp_var ()
+        | None -> Ctx.fresh_v ctx
         | Some s -> s)
       func.params
   in
