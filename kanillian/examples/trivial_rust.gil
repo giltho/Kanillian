@@ -1,0 +1,14 @@
+import "unops_common.gil", "internals.gil", "global_environment_common.gil",
+       "binops_common.gil", "string.gil", "stdlib_archi64.gil",
+       "stdlib_archi64_non_verif.gil", "global_environment_archi64.gil",
+       "binops_archi64_all_exec.gil", "binops_archi64_non_bi.gil",
+       "genv_unallocated_functions.gil";
+
+
+proc main() {
+       main__1__var_0 := undefined;
+       main__1__var_1__x := undefined;
+  bb0: main__1__var_1__x := {{ "int", 4i }};
+       ret := null;
+       return
+};

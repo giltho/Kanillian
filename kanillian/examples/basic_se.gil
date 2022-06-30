@@ -1,0 +1,19 @@
+import "cbmc_runtime.gil", "unops_common.gil", "internals.gil",
+       "global_environment_common.gil", "binops_common.gil", "string.gil",
+       "stdlib_archi64.gil", "stdlib_archi64_non_verif.gil",
+       "global_environment_archi64.gil", "binops_archi64_all_exec.gil",
+       "binops_archi64_non_bi.gil", "genv_unallocated_functions.gil";
+
+
+proc main() {
+    spec_var (#lvar_0);
+    assume ((#lvar_0 == {{ "int", #lvar_1 }}));
+    assume_type (#lvar_1, Int);
+    main__1__x := #lvar_0;
+    temp__0 := "i__cbmc_binop_cmp_ge"(main__1__x, {{ "int", 0i }});
+    assume ((temp__0 == true));
+    temp__1 := "i__cbmc_binop_cmp_le"(main__1__x, {{ "int", 100i }});
+    assert ((temp__1 == true));
+    ret := {{ "int", 0i }};
+    return
+};

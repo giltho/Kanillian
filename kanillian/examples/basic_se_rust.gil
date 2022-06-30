@@ -1,0 +1,40 @@
+import "cbmc_runtime.gil", "unops_common.gil", "internals.gil",
+       "global_environment_common.gil", "binops_common.gil", "string.gil",
+       "stdlib_archi64.gil", "stdlib_archi64_non_verif.gil",
+       "global_environment_archi64.gil", "binops_archi64_all_exec.gil",
+       "binops_archi64_non_bi.gil", "genv_unallocated_functions.gil";
+
+
+proc main() {
+       main__1__var_0 := undefined;
+       main__1__var_1__x := undefined;
+       main__1__var_2 := undefined;
+       main__1__var_3 := undefined;
+       main__1__var_4 := undefined;
+       main__1__var_5 := undefined;
+       main__1__var_6 := undefined;
+       main__1__var_7 := undefined;
+  bb0: temp__0 := "_RINvCs5FbjRPIFBN0_4kani3anylECsi5dEDqLRZm9_4test"(
+  );
+       main__1__var_1__x := temp__0;
+       goto bb1;
+  bb1: main__1__var_4 := main__1__var_1__x;
+       temp__1 := "i__cbmc_binop_cmp_ge"(main__1__var_4, {{ "int", 0i }});
+       temp__2 := "i__value_of_bool"(temp__1);
+       main__1__var_3 := temp__2;
+       temp__3 := "i__cbmc_binop_cmpu_eq"(main__1__var_3, {{ "int", 0i }});
+       assume ((temp__3 == true));
+       goto bb2;
+  bb2: main__1__var_7 := main__1__var_1__x;
+       temp__4 := "i__cbmc_binop_cmp_lt"(main__1__var_7, {{ "int", 100i }});
+       temp__5 := "i__value_of_bool"(temp__4);
+       main__1__var_6 := temp__5;
+       assume (False);
+       temp__6 := "i__cbmc_binop_cmpu_eq"(main__1__var_6, {{ "int", 0i }});
+       main__1__temp_0 := temp__6;
+       assume ((main__1__temp_0 == true));
+       assume ((main__1__temp_0 == true));
+       goto bb3;
+  bb3: ret := VoidUnit;
+       return
+};
