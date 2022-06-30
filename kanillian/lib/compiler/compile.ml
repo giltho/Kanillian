@@ -3,43 +3,28 @@ module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
 open Gillian.Utils.Prelude
 
-let as_pure_string_literal (e : GExpr.t) =
-  match e.value with
-  | AddressOf
-      {
-        value =
-          Index
-            {
-              array = { value = StringConstant str; _ };
-              index = { value = IntConstant z; _ };
-            };
-        _;
-      } ->
-      let idx = Z.to_int z in
-      String.sub str (Z.to_int z) (String.length str - idx)
-  | StringConstant str -> str
-  | _ -> Error.unexpected ("not a pure string literal: " ^ GExpr.show e)
+(* let as_pure_string_literal (e : GExpr.t) =
+   match e.value with
+   | AddressOf
+
+         value =
+           Index
+             {
+               array = { value = StringConstant str; _ };
+               index = { value = IntConstant z; _ };
+             };
+         _;
+       } ->
+       let idx = Z.to_int z in
+       String.sub str (Z.to_int z) (String.length str - idx)
+   | StringConstant str -> str
+   | _ -> Error.unexpected ("not a pure string literal: " ^ GExpr.show e) *)
 
 (** Gillian-C utils for compilation*)
 module Gcu = struct
   include Compcert
   module Vt = Cgil_lib.ValueTranslation
 end
-
-let sanitize_symbol s = Str.global_replace (Str.regexp "[:]") "_" s
-let as_gil_variable e = GExpr.as_symbol e |> sanitize_symbol
-
-let compile_location (loc : Goto_lib.Location.t) =
-  match loc.source with
-  | None -> Location.none
-  | Some source ->
-      let pos_line = Option.value ~default:0 loc.line in
-      let pos_column = Option.value ~default:0 loc.col in
-      let loc_start = Location.{ pos_line; pos_column } in
-      let loc_end = Location.{ pos_line; pos_column = pos_column + 2 } in
-      Location.{ loc_source = source; loc_start; loc_end }
-
-let find_main symtab = Hashtbl.find symtab "main"
 
 let call_for_binop
     ~(ctx : Ctx.t)
@@ -172,7 +157,7 @@ let nondet_expr ~ctx ~add_annot ~type_ () : Expr.t Cs.with_body =
       let* hash_x = Cs.return (Ctx.fresh_lv ctx) in
       let* () = Cs.unit [ Cmd.Logic (LCmd.SpecVar [ hash_x ]) ] in
       let+ () = assume_type ~ctx type_ hash_x in
-      Expr.PVar hash_x
+      Expr.LVar hash_x
     in
     Cs.map_l add_annot res
 
@@ -194,11 +179,23 @@ let compile_cast ~ctx ~(from : GType.t) ~(into : GType.t) e :
 let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
   let open Cs.Syntax in
   let compile_expr = compile_expr ~ctx in
-  let loc = compile_location expr.location in
+  let loc = Body_item.compile_location expr.location in
   let id = expr.location.origin_id in
   let b = Body_item.make ~loc ~id in
   match expr.value with
-  | Symbol s -> Cs.return (Expr.PVar (sanitize_symbol s))
+  | Symbol _ | Dereference _ | Index _ | Member _ -> (
+      let* access = Lvalue.as_access ~ctx ~read:true expr in
+      match access with
+      | Direct x -> Cs.return (Expr.PVar x)
+      | InMemoryScalar { loaded = Some e; _ } -> Cs.return e
+      | InMemoryScalar { loaded = None; ptr } ->
+          let+ var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
+          Expr.PVar var)
+  | AddressOf x -> (
+      let* access = Lvalue.as_access ~ctx ~read:true x in
+      match access with
+      | Direct x -> Error.code_error ("address of direct access to " ^ x)
+      | InMemoryScalar { ptr; _ } -> Cs.return ptr)
   | BoolConstant b -> Cs.return (Expr.Lit (Bool b))
   | CBoolConstant b ->
       let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
@@ -335,7 +332,7 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
 let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let compile_statement = compile_statement ~ctx in
   let compile_expr = compile_expr ~ctx in
-  let loc = compile_location stmt.location in
+  let loc = Body_item.compile_location stmt.location in
   let id = stmt.location.origin_id in
   let b = Body_item.make ~loc ~id in
   let add_annot x = List.map b x in
@@ -375,17 +372,42 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let variable = Utils.Names.return_variable in
       s @ add_annot [ Assignment (variable, e); ReturnNormal ]
   | Decl { lhs; value } ->
-      let lhs = as_gil_variable lhs in
-      let v, s =
-        match value with
-        | Some e -> compile_expr e
-        | None -> (Lit Undefined, [])
-      in
-      s @ [ b (Assignment (lhs, v)) ]
+      let ty = lhs.type_ in
+      let lhs = GExpr.as_symbol lhs in
+      if Ctx.in_memory ctx lhs then
+        let loc = Ctx.fresh_v ctx in
+        let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
+        let size = Ctx.size_of ctx ty in
+        let action_cmd =
+          Cmd.LAction (loc, alloc, [ Expr.zero_i; Expr.int size ])
+        in
+        let loc = Expr.list_nth (Expr.PVar loc) 0 in
+        let assign = Cmd.Assignment (lhs, Expr.EList [ loc; Expr.zero_i ]) in
+        let write =
+          match value with
+          | None -> []
+          | Some e ->
+              let v, pre = compile_expr e in
+              let write = Memory.store_scalar ~ctx (Expr.PVar lhs) v ty in
+              pre @ [ b write ]
+        in
+        [ b action_cmd; b assign ] @ write
+      else
+        let v, s =
+          match value with
+          | Some e -> compile_expr e
+          | None -> (Lit Undefined, [])
+        in
+        s @ [ b (Assignment (lhs, v)) ]
   | Assign { lhs; rhs } ->
-      let lhs = as_gil_variable lhs in
-      let v, s = compile_expr rhs in
-      s @ [ b (Assignment (lhs, v)) ]
+      let access, pre1 = Lvalue.as_access ~ctx ~read:false lhs in
+      let v, pre2 = compile_expr rhs in
+      let write =
+        match access with
+        | Direct x -> Cmd.Assignment (x, v)
+        | InMemoryScalar { ptr; _ } -> Memory.store_scalar ~ctx ptr v lhs.type_
+      in
+      pre1 @ pre2 @ [ b write ]
   | Expression e ->
       let _, s = compile_expr e in
       s
@@ -393,7 +415,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
 
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let ctx = Ctx.with_new_generators ctx in
-  let f_loc = compile_location func.location in
+  let f_loc = Body_item.compile_location func.location in
   let body =
     match func.body with
     | Some b -> b

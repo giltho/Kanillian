@@ -5,8 +5,6 @@ module Global_var = struct
     value : Expr.t option;
     location : Location.t;
   }
-
-  let init _t = ()
 end
 
 module Func = struct

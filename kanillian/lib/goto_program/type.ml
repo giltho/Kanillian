@@ -23,10 +23,6 @@ let is_function = function
   | Code _ -> true (* Will also be true for variadic code if ever *)
   | _ -> false
 
-let is_zst = function
-  | Empty -> true
-  | _ -> false
-
 open Irep.Infix
 
 (** This feels a bit hacky, maybe the constant-deserialization
@@ -142,3 +138,28 @@ let type_in_irep ~machine irep = of_irep ~machine (irep $ Type)
 let as_int_type = function
   | CInteger ty -> ty
   | _ -> failwith "Not an integer type"
+
+(** Returns the size of a type in bits *)
+let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
+  let bit_size_of = bit_size_of ~tag_lookup ~machine in
+  match t with
+  | Array (ty, sz) -> sz * bit_size_of ty
+  | CInteger I_bool -> machine.bool_width
+  | CInteger I_int -> machine.int_width
+  | CInteger I_char -> machine.char_width
+  | CInteger (I_size_t | I_ssize_t) | Pointer _ -> machine.pointer_width
+  | Float -> 32
+  | Double -> 64
+  | Signedbv { width } | Unsignedbv { width } -> width
+  | Empty -> 0
+  | StructTag x | UnionTag x -> bit_size_of (tag_lookup x)
+  | Struct { components = []; _ } -> 0
+  | Struct _ -> Gerror.unhandled "bit_size_of non-empty Struct"
+  | Union _ -> Gerror.unhandled "bit_size_of Union"
+  | Bool -> Gerror.code_error "bit_size_of Bool"
+  | Code _ -> Gerror.code_error "bit_size_of Code"
+  | Constructor -> Gerror.code_error "bit_size_of Constructor"
+  | IncompleteStruct _ -> Gerror.code_error "bit_size_of IncompleteStruct"
+
+(** Returns the size of a type in bytes *)
+let size_of ~machine ~tag_lookup t = bit_size_of ~machine ~tag_lookup t / 8

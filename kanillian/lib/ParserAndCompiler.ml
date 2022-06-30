@@ -71,6 +71,7 @@ let parse_and_compile_files files =
       | _ -> failwith "Kanillian only handles one symtab file at the moment"
     in
     let+ goto_prog = parse_symtab_into_goto path in
+    let () = Sanitize.sanitize_program_in_place goto_prog in
     let context = Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog () in
     let gil_prog = Compile.compile context in
     create_compilation_result path goto_prog gil_prog

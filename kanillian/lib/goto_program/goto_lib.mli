@@ -150,6 +150,7 @@ and Type : sig
     | Empty
   [@@deriving show]
 
+  val size_of : machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> int
   val is_function : t -> bool
   val as_int_type : t -> IntType.t
   val of_irep : machine:Machine_model.t -> Irep.t -> t
@@ -217,8 +218,6 @@ module Program : sig
       value : Expr.t option;
       location : Location.t;
     }
-
-    val init : 'a -> unit
   end
 
   module Func : sig

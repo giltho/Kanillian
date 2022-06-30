@@ -23,6 +23,7 @@ module Symbols_in_memory = struct
 
   (** A hashet containing all the  *)
   let gather ~prog stmt =
+    let set = Hashset.empty () in
     let representable_in_store (type_ : Type.t) =
       match type_ with
       | Bool
@@ -35,32 +36,20 @@ module Symbols_in_memory = struct
       | Empty -> true
       | _ -> Program.is_zst ~prog type_
     in
-    let symbol_collector =
-      object
-        inherit [string Hashset.t] Goto_lib.Visitors.iter as super
-
-        method! visit_expr_value ~ctx ~type_ (e : Expr.value) =
-          match e with
-          | Symbol s -> Hashset.add ctx s
-          | _ -> super#visit_expr_value ~ctx ~type_ e
-      end
-    in
     let addressed_visitor =
       object
-        inherit [string Hashset.t] Goto_lib.Visitors.iter as super
+        inherit [bool] Goto_lib.Visitors.iter as super
 
         method! visit_expr_value ~ctx ~type_ (e : Expr.value) =
           match e with
           | Member { lhs = e; _ } | Index { array = e; _ } | AddressOf e ->
-              symbol_collector#visit_expr ~ctx e;
-              super#visit_expr ~ctx e
-          | Symbol x when not (representable_in_store type_) ->
-              Hashset.add ctx x
+              super#visit_expr ~ctx:true e
+          | Symbol x when ctx || not (representable_in_store type_) ->
+              Hashset.add set x
           | _ -> super#visit_expr_value ~ctx ~type_ e
       end
     in
-    let set = Hashset.empty () in
-    addressed_visitor#visit_stmt ~ctx:set stmt;
+    addressed_visitor#visit_stmt ~ctx:false stmt;
     set
 end
 
@@ -95,3 +84,8 @@ let in_memory t x = Hashset.mem t.in_memory x
 let with_in_memory t stmt =
   let in_memory = Symbols_in_memory.gather ~prog:t.prog stmt in
   { t with in_memory }
+
+let size_of ctx ty =
+  let tag_lookup x = Hashtbl.find ctx.prog.types x in
+  let machine = ctx.machine in
+  Type.size_of ~tag_lookup ~machine ty
