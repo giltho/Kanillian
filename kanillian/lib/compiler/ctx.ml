@@ -18,12 +18,16 @@ module Generators = struct
       ret
 end
 
-module Symbols_in_memory = struct
+module Local = struct
   open Goto_lib
 
-  (** A hashet containing all the  *)
+  type t = { symbol : string; type_ : Type.t; location : Location.t }
+
+  (** Returns two hashsets: one containing every local variable,
+      the other one containing all the variables used that are in memory *)
   let gather ~prog stmt =
-    let set = Hashset.empty () in
+    let locals = Hashset.empty () in
+    let in_memory = Hashset.empty () in
     let representable_in_store (type_ : Type.t) =
       match type_ with
       | Bool
@@ -36,7 +40,7 @@ module Symbols_in_memory = struct
       | Empty -> true
       | _ -> Program.is_zst ~prog type_
     in
-    let addressed_visitor =
+    let visitor =
       object
         inherit [bool] Goto_lib.Visitors.iter as super
 
@@ -45,12 +49,21 @@ module Symbols_in_memory = struct
           | Member { lhs = e; _ } | Index { array = e; _ } | AddressOf e ->
               super#visit_expr ~ctx:true e
           | Symbol x when ctx || not (representable_in_store type_) ->
-              Hashset.add set x
+              Hashset.add in_memory x
           | _ -> super#visit_expr_value ~ctx ~type_ e
+
+        method! visit_stmt_body ~ctx (s : Stmt.body) =
+          match s with
+          | Decl { lhs = { value = Symbol x; type_; location } as lhs; value }
+            ->
+              Hashset.add locals { symbol = x; type_; location };
+              super#visit_expr ~ctx lhs;
+              Option.iter (super#visit_expr ~ctx) value
+          | _ -> super#visit_stmt_body ~ctx s
       end
     in
-    addressed_visitor#visit_stmt ~ctx:false stmt;
-    set
+    visitor#visit_stmt ~ctx:false stmt;
+    (locals, in_memory)
 end
 
 type t = {
@@ -59,10 +72,12 @@ type t = {
   fresh_v : unit -> string;
   fresh_lv : unit -> string;
   in_memory : string Hashset.t;
+  locals : Local.t Hashset.t;
 }
 
 let make ~machine ~prog () =
   {
+    locals = Hashset.empty ();
     in_memory = Hashset.empty ();
     machine;
     prog;
@@ -81,10 +96,6 @@ let fresh_v t = t.fresh_v ()
 let fresh_lv t = t.fresh_lv ()
 let in_memory t x = Hashset.mem t.in_memory x
 
-let with_in_memory t stmt =
-  let in_memory = Symbols_in_memory.gather ~prog:t.prog stmt in
-  { t with in_memory }
-
 let size_of ctx ty =
   try
     let tag_lookup x = Hashtbl.find ctx.prog.types x in
@@ -94,3 +105,9 @@ let size_of ctx ty =
   | Gerror.Code_error (_, msg) -> Error.code_error msg
   | Gerror.Unexpected_irep (_, msg) -> Error.unexpected msg
   | Gerror.Unhandled_irep (_, msg) -> Error.unhandled msg
+
+let with_entering_body ctx stmt =
+  let locals, in_memory = Local.gather ~prog:ctx.prog stmt in
+  let fresh_v = Generators.temp_var () in
+  let fresh_lv = Generators.temp_lvar () in
+  { ctx with in_memory; locals; fresh_lv; fresh_v }

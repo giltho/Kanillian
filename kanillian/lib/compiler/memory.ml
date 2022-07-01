@@ -49,6 +49,20 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
   | Pointer _ -> int_chuck_for ~signed:false ~size:ctx.machine.pointer_width
   | _ -> Error.code_error "chunk_for_type: received a type that is not a unit"
 
+(** Should only be called for a local that is in memory*)
+let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
+  if not (Ctx.in_memory ctx l.symbol) then
+    Error.code_error "dealloc_local: local is not in memory";
+  let free = Cgil_lib.LActions.(str_ac (AMem Free)) in
+  let size = Ctx.size_of ctx l.type_ |> Expr.int in
+  let var = Ctx.fresh_v ctx in
+  let cmd =
+    Cmd.LAction
+      (var, free, [ Expr.list_nth (Expr.PVar l.symbol) 0; Expr.zero_i; size ])
+  in
+  let loc = Body_item.compile_location l.location in
+  Body_item.make ~loc ~id:l.location.origin_id cmd
+
 (** Loads a value into the given variable.
     If no variable is given, one is created.
     In any case, the variable containing the value, as well as

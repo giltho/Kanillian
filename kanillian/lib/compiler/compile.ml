@@ -415,10 +415,19 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       s
   | Switch _ -> Error.unhandled "switch statement"
 
+let compile_free_locals (ctx : Ctx.t) =
+  let open Kutils.Prelude in
+  let locals = Hashset.copy ctx.locals in
+  let () =
+    Hashset.filter_in_place locals (fun (local : Ctx.Local.t) ->
+        Ctx.in_memory ctx local.symbol)
+  in
+  Hashset.to_seq locals |> Seq.map (Memory.dealloc_local ~ctx) |> List.of_seq
+
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
-  let ctx = Ctx.with_new_generators ctx in
   let f_loc = Body_item.compile_location func.location in
   let body =
+    (* If the function has no body, it's assumed to be just non-det *)
     match func.body with
     | Some b -> b
     | None ->
@@ -432,7 +441,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         in
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
-  let ctx = Ctx.with_in_memory ctx body in
+  let ctx = Ctx.with_entering_body ctx body in
   let proc_params =
     List.map
       (fun x ->
@@ -442,7 +451,8 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
       func.params
   in
   let proc_spec = None in
-  let proc_body = Array.of_list (compile_statement ~ctx body) in
+  let free_locals = compile_free_locals ctx in
+  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals) in
   Proc.
     {
       proc_name = func.symbol;
