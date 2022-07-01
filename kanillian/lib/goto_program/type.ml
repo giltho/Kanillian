@@ -154,7 +154,7 @@ let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   | Empty -> 0
   | StructTag x | UnionTag x -> bit_size_of (tag_lookup x)
   | Struct { components = []; _ } -> 0
-  | Struct _ -> Gerror.unhandled "bit_size_of non-empty Struct"
+  | Struct _ -> Gerror.unhandled ("bit_size_of non-empty Struct " ^ show t)
   | Union _ -> Gerror.unhandled "bit_size_of Union"
   | Bool -> Gerror.code_error "bit_size_of Bool"
   | Code _ -> Gerror.code_error "bit_size_of Code"

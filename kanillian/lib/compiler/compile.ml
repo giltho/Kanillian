@@ -1,7 +1,6 @@
 open Gil_syntax
 module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
-open Gillian.Utils.Prelude
 
 (* let as_pure_string_literal (e : GExpr.t) =
    match e.value with
@@ -40,10 +39,10 @@ let call_for_binop
     match binop with
     | Notequal -> (
         match lty with
-        | I_int | I_char -> cmp_eq
-        | I_bool -> cmpu_eq
-        | I_size_t -> cmplu_eq
-        | I_ssize_t -> cmplu_eq)
+        | I_int | I_char -> cmp_ne
+        | I_bool -> cmpu_ne
+        | I_size_t -> cmplu_ne
+        | I_ssize_t -> cmplu_ne)
     | Le -> (
         match lty with
         | I_int | I_char -> cmp_le
@@ -355,7 +354,10 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         | Some (f, _) -> f
       in
       pre @ [ b (Logic (Assume f)) ]
-  | Assert { cond } ->
+  | Assert { property_class = Some "coverage_check"; _ } ->
+      (* We can't output nothing, as a label might have to get attached *)
+      [ b Skip ]
+  | Assert { cond; property_class = _ } ->
       let e, pre = compile_expr cond in
       let f =
         match Formula.lift_logic_expr e with
@@ -453,12 +455,6 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
 
 let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   let program = context.prog in
-  Printf.printf "%d types; %d global variables; %d functions\n"
-    (Hashtbl.length program.types)
-    (Hashtbl.length program.vars)
-    (Hashtbl.length program.funs);
-  let to_compile = Queue.create () in
-  Queue.push "main" to_compile;
   let gil_prog = Prog.create () in
   let gil_prog =
     Program.fold_functions

@@ -86,6 +86,11 @@ let with_in_memory t stmt =
   { t with in_memory }
 
 let size_of ctx ty =
-  let tag_lookup x = Hashtbl.find ctx.prog.types x in
-  let machine = ctx.machine in
-  Type.size_of ~tag_lookup ~machine ty
+  try
+    let tag_lookup x = Hashtbl.find ctx.prog.types x in
+    let machine = ctx.machine in
+    Type.size_of ~tag_lookup ~machine ty
+  with
+  | Gerror.Code_error (_, msg) -> Error.code_error msg
+  | Gerror.Unexpected_irep (_, msg) -> Error.unexpected msg
+  | Gerror.Unhandled_irep (_, msg) -> Error.unhandled msg

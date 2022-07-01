@@ -1,4 +1,12 @@
-let sanitize_symbol s = Str.global_replace (Str.regexp "[:]") "_" s
+let sanitize_symbol s =
+  let replaced = Str.global_replace (Str.regexp {|[:\.\$]|}) "_" s in
+  match String.get replaced 0 with
+  | 'A' .. 'Z' | 'a' .. 'z' -> replaced
+  | _ -> "m__" ^ replaced
+
+let sanitize_symbol s =
+  let new_s = sanitize_symbol s in
+  new_s
 
 let sanitizer =
   object
@@ -6,6 +14,7 @@ let sanitizer =
 
     method! visit_expr_value ~ctx ~type_ value =
       match value with
+      (* Rename any other symbol *)
       | Symbol s -> Symbol (sanitize_symbol s)
       | _ -> super#visit_expr_value ~ctx ~type_ value
   end
@@ -13,8 +22,11 @@ let sanitizer =
 let sanitize_expr = sanitizer#visit_expr ~ctx:()
 let sanitize_stmt = sanitizer#visit_stmt ~ctx:()
 
+let sanitize_param (p : Param.t) =
+  { p with identifier = Option.map sanitize_symbol p.identifier }
+
 (** Sanitizes every variable symbol symbol. *)
-let sanitize_program_in_place (prog : Program.t) =
+let sanitize_program (prog : Program.t) =
   (* Create a second table with the new vars *)
   let new_vars = Hashtbl.create (Hashtbl.length prog.vars) in
   Hashtbl.iter
@@ -30,12 +42,23 @@ let sanitize_program_in_place (prog : Program.t) =
           }
       in
       Hashtbl.add new_vars new_name new_gvar)
-    new_vars;
-  (* Override the old table *)
-  Hashtbl.clear prog.vars;
-  Hashtbl.iter (fun name gvar -> Hashtbl.add prog.vars name gvar) new_vars;
+    prog.vars;
 
-  Hashtbl.filter_map_inplace
-    (fun _ func ->
-      Some Program.Func.{ func with body = Option.map sanitize_stmt func.body })
-    prog.funs
+  let new_funs = Hashtbl.create (Hashtbl.length prog.funs) in
+  Hashtbl.iter
+    (fun name func ->
+      let new_name = sanitize_symbol name in
+      let new_fun =
+        Program.Func.
+          {
+            symbol = new_name;
+            params = List.map sanitize_param func.params;
+            body = Option.map sanitize_stmt func.body;
+            location = func.location;
+            return_type = func.return_type;
+          }
+      in
+      Hashtbl.add new_funs new_name new_fun)
+    prog.funs;
+
+  { prog with funs = new_funs; vars = new_vars }

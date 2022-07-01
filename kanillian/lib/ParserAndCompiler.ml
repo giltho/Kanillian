@@ -43,13 +43,6 @@ let parse_symtab_into_goto file =
           m
             "Filtering every cprover_specific symbol!! Need to remove that in \
              the future");
-      let tbl =
-        if !Kconfig.main_only then
-          let ntbl = Hashtbl.create 1 in
-          let () = Hashtbl.add ntbl "main" (Hashtbl.find tbl "main") in
-          ntbl
-        else tbl
-      in
       Goto_lib.Program.of_symtab ~machine tbl)
     tbl
 
@@ -64,16 +57,14 @@ let create_compilation_result path goto_prog gil_prog =
 let parse_and_compile_files files =
   let open Kanillian_compiler in
   let open Utils.Syntaxes.Result in
-  let f files =
-    let path =
-      match files with
-      | [ p ] -> p
-      | _ -> failwith "Kanillian only handles one symtab file at the moment"
-    in
-    let+ goto_prog = parse_symtab_into_goto path in
-    let () = Sanitize.sanitize_program_in_place goto_prog in
-    let context = Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog () in
-    let gil_prog = Compile.compile context in
-    create_compilation_result path goto_prog gil_prog
+  let path =
+    match files with
+    | [ p ] -> p
+    | _ -> failwith "Kanillian only handles one symtab file at the moment"
   in
-  f files
+  let+ goto_prog = parse_symtab_into_goto path in
+  if !Kconfig.main_only then Main_only.filter_funs goto_prog;
+  let goto_prog = Sanitize.sanitize_program goto_prog in
+  let context = Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog () in
+  let gil_prog = Compile.compile context in
+  create_compilation_result path goto_prog gil_prog

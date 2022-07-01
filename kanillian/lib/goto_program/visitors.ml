@@ -87,7 +87,7 @@ class ['a] iter =
       | Assign { lhs; rhs } ->
           self#visit_expr ~ctx lhs;
           self#visit_expr ~ctx rhs
-      | Assume { cond } | Assert { cond } -> self#visit_expr ~ctx cond
+      | Assume { cond } | Assert { cond; _ } -> self#visit_expr ~ctx cond
       | Label (_, l) | Block l -> List.iter (self#visit_stmt ~ctx) l
       | Expression e -> self#visit_expr ~ctx e
       | Return e -> Option.iter (self#visit_expr ~ctx) e
@@ -284,9 +284,10 @@ class ['a] map =
       | Assume { cond } ->
           let new_cond = self#visit_expr ~ctx cond in
           if new_cond == cond then body else Assume { cond = new_cond }
-      | Assert { cond } ->
+      | Assert { cond; property_class } ->
           let new_cond = self#visit_expr ~ctx cond in
-          if new_cond == cond then body else Assert { cond = new_cond }
+          if new_cond == cond then body
+          else Assert { cond = new_cond; property_class }
       | Label (label, l) ->
           let changed = ref false in
           let new_l = map_mark_changed ~changed (self#visit_stmt ~ctx) l in

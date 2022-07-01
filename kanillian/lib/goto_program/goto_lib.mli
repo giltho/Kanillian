@@ -1,3 +1,9 @@
+module Gerror : sig
+  exception Unexpected_irep of Irep.t option * string
+  exception Unhandled_irep of Irep.t option * string
+  exception Code_error of Irep.t option * string
+end
+
 module Machine_model : sig
   type t = {
     alignment : int;
@@ -190,7 +196,7 @@ module Stmt : sig
     | Decl of { lhs : Expr.t; value : Expr.t option }
     | Assign of { lhs : Expr.t; rhs : Expr.t }
     | Assume of { cond : Expr.t }
-    | Assert of { cond : Expr.t }
+    | Assert of { cond : Expr.t; property_class : string option }
     | Block of t list
     | Label of string * t list
     | Goto of string
@@ -206,6 +212,7 @@ module Stmt : sig
   and switch_case = { case : Expr.t; sw_body : t }
   and t = { location : Location.t; body : body }
 
+  val pp : Format.formatter -> t -> unit
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end

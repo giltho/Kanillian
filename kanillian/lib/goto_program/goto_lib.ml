@@ -1,3 +1,4 @@
+module Gerror = Gerror
 module Machine_model = Machine_model
 module IntType = IntType
 module Ops = Ops

@@ -162,7 +162,7 @@ proc i__cbmc_binop_cmp_eq(v1, v2) {
 
 
 proc i__cbmc_binop_cmp_ne(v1, v2) {
-        ir := "i__binop_cmp_eq"(v1, v2);
+        ir := "i__cbmc_binop_cmp_eq"(v1, v2);
         ret := not ir;
         return
 };

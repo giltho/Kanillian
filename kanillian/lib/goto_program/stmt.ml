@@ -2,7 +2,7 @@ type body =
   | Decl of { lhs : Expr.t; value : Expr.t option }
   | Assign of { lhs : Expr.t; rhs : Expr.t }
   | Assume of { cond : Expr.t }
-  | Assert of { cond : Expr.t }
+  | Assert of { cond : Expr.t; property_class : string option }
   | Block of t list
   | Label of string * t list
   | Goto of string
@@ -25,7 +25,12 @@ let rec pp ft (t : t) =
         value
   | Assign { lhs; rhs } -> pf ft "@[<h>%a = %a;@]" Expr.pp lhs Expr.pp rhs
   | Assume { cond } -> pf ft "@[<h>assume(%a);@]" Expr.pp cond
-  | Assert { cond } -> pf ft "@[<h>assert(%a);@]" Expr.pp cond
+  | Assert { cond; property_class } ->
+      let pp_pc ft = function
+        | None -> pf ft ""
+        | Some s -> pf ft " #%s" s
+      in
+      pf ft "@[<h>assert(%a);%a@]" Expr.pp cond pp_pc property_class
   | Block body -> pf ft "@[<v 3>{ %a };@]" (Fmt.list ~sep:cut pp) body
   | Label (label, body) ->
       pf ft "@[<v 3>%s: {@.%a};@]" label (Fmt.list ~sep:cut pp) body
@@ -73,7 +78,13 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
   | Assert ->
       (* I might need to extract the property_class/msg here too *)
       let to_assert = exactly_one ~msg:"Assert stmt" irep in
-      Assume { cond = expr_of_irep to_assert }
+      let property_class =
+        let open Kutils.Syntaxes.Option in
+        let* sloc = irep $? CSourceLocation in
+        let+ pc = sloc $? PropertyClass in
+        Irep.as_just_string pc
+      in
+      Assert { cond = expr_of_irep to_assert; property_class }
   | Return ->
       let ret_value_irep =
         match irep.sub with
