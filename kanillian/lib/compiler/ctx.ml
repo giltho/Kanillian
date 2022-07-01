@@ -23,10 +23,9 @@ module Local = struct
 
   type t = { symbol : string; type_ : Type.t; location : Location.t }
 
-  (** Returns two hashsets: one containing every local variable,
-      the other one containing all the variables used that are in memory *)
+  (** Returns the locals Hashtbl and the in_memory hashset *)
   let gather ~prog stmt =
-    let locals = Hashset.empty () in
+    let locals = Hashtbl.create 1 in
     let in_memory = Hashset.empty () in
     let representable_in_store (type_ : Type.t) =
       match type_ with
@@ -56,7 +55,7 @@ module Local = struct
           match s with
           | Decl { lhs = { value = Symbol x; type_; location } as lhs; value }
             ->
-              Hashset.add locals { symbol = x; type_; location };
+              Hashtbl.replace locals x { symbol = x; type_; location };
               super#visit_expr ~ctx lhs;
               Option.iter (super#visit_expr ~ctx) value
           | _ -> super#visit_stmt_body ~ctx s
@@ -72,29 +71,24 @@ type t = {
   fresh_v : unit -> string;
   fresh_lv : unit -> string;
   in_memory : string Hashset.t;
-  locals : Local.t Hashset.t;
+  locals : (string, Local.t) Hashtbl.t;
 }
 
 let make ~machine ~prog () =
   {
-    locals = Hashset.empty ();
-    in_memory = Hashset.empty ();
+    locals = Hashtbl.create 0;
+    in_memory = Hashset.empty ~size:0 ();
     machine;
     prog;
     fresh_v = (fun () -> failwith "uninitialized var generator");
-    fresh_lv = (fun () -> failwith "uninitialized lvar generator");
-  }
-
-let with_new_generators t =
-  {
-    t with
-    fresh_v = Generators.temp_var ();
     fresh_lv = Generators.temp_lvar ();
   }
 
+let with_new_generators t = { t with fresh_v = Generators.temp_var () }
 let fresh_v t = t.fresh_v ()
 let fresh_lv t = t.fresh_lv ()
 let in_memory t x = Hashset.mem t.in_memory x
+let is_local t x = Hashtbl.mem t.locals x
 
 let size_of ctx ty =
   try
@@ -109,5 +103,4 @@ let size_of ctx ty =
 let with_entering_body ctx stmt =
   let locals, in_memory = Local.gather ~prog:ctx.prog stmt in
   let fresh_v = Generators.temp_var () in
-  let fresh_lv = Generators.temp_lvar () in
-  { ctx with in_memory; locals; fresh_lv; fresh_v }
+  { ctx with in_memory; locals; fresh_v }

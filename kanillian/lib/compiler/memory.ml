@@ -81,10 +81,15 @@ let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
   let load_cmd = Cmd.Call (var, Lit (String loadv), [ chunk; e ], None, None) in
   (var, [ load_cmd ])
 
-let store_scalar ~ctx (p : Expr.t) (v : Expr.t) (t : GType.t) : string Cmd.t =
+let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
+    string Cmd.t =
   let chunk = chunk_for_type ~ctx t in
   let chunk = Expr.Lit (String (chunk_to_string chunk)) in
-  let var = Ctx.fresh_v ctx in
+  let var =
+    match var with
+    | Some var -> var
+    | None -> Ctx.fresh_v ctx
+  in
   let storev = Cgil_lib.CConstants.Internal_Functions.storev in
   let store_cmd =
     Cmd.Call (var, Lit (String storev), [ chunk; p; v ], None, None)

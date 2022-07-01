@@ -25,6 +25,11 @@ module Comp_functions = struct
   let cmp_ne = "i__cbmc_binop_cmp_ne"
 end
 
+module Cast_functions = struct
+  let unsign_int = "i__cbmc_unsign_int"
+  let unsign_long = "i__cbmc_unsign_long"
+end
+
 module Imports = struct
   let env_path_var = "KANILLIAN_RUNTIME_PATH"
   let imports = [ ("cbmc_runtime.gil", false) ]

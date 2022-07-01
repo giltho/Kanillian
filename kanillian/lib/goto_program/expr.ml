@@ -9,6 +9,7 @@ type value =
   | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
   | ByteExtract of { e : t; offset : int }
   | Dereference of t
+  | Assign of { lhs : t; rhs : t }
   | UnOp of { op : Ops.Unary.t; e : t }
   | Struct of t list
   | Member of { lhs : t; field : string }
@@ -26,6 +27,7 @@ let pp ft t =
     let open Fmt in
     match t.value with
     | Array x -> pf ft "%a" (list ~sep:comma pp) x
+    | Assign { lhs; rhs } -> pf ft "%a = %a" pp lhs pp rhs
     | IntConstant z -> pf ft "%a" Z.pp_print z
     | CBoolConstant b -> pf ft "%d" (if b then 1 else 0)
     | PointerConstant 0 -> pf ft "NULL"
@@ -82,7 +84,11 @@ and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
       in
       FunctionCall { func; args }
   | Nondet -> Nondet
-  | _ -> Gerror.unhandled ~irep "unknown side-effecting irep"
+  | Assign ->
+      let lhs, rhs = exactly_two irep in
+      Assign { lhs = of_irep lhs; rhs = of_irep rhs }
+  | id ->
+      Gerror.unhandled ~irep ("unknown side-effecting irep: " ^ Id.to_string id)
 
 and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
     =

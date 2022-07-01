@@ -69,10 +69,6 @@ let call_for_binop
   in
   (Expr.PVar gvar, [ call ])
 
-let is_assume_call f = String.equal (GExpr.as_symbol f) "__CPROVER_assume"
-let is_assert_call f = String.equal (GExpr.as_symbol f) "__CPROVER_assert"
-let is_nondet_call f = String.equal (GExpr.as_symbol f) "__nondet"
-
 let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
   let llvar = Expr.LVar lvar in
   Cs.unit
@@ -131,14 +127,27 @@ let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
       let assume_obj = Cmd.Logic (AssumeType (loc, ObjectType)) in
       let assume_int = Cmd.Logic (AssumeType (ofs, IntType)) in
       [ assume_list; assume_obj; assume_int ]
+  | Bool ->
+      let v = Ctx.fresh_lv ctx in
+      let assume_bool = Cmd.Logic (AssumeType (v, BooleanType)) in
+      [ assume_bool ]
   | StructTag tag | UnionTag tag | Struct { tag; _ } | Union { tag; _ } ->
       (* TODO: Add a signal here for something unhandled! *)
       let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String tag) ]) in
       [ fail ]
   | _ ->
-      let fail =
-        Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String "Something else") ])
+      let ty_name =
+        match type_ with
+        | Constructor -> "constructor"
+        | Empty -> "empty"
+        | Array _ -> "array"
+        | Signedbv _ -> "signedbv"
+        | Unsignedbv _ -> "unsignedbv"
+        | Code _ -> "code"
+        | IncompleteStruct _ -> "incomplete_struct"
+        | _ -> Error.code_error "unreachable"
       in
+      let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String ty_name) ]) in
       [ fail ]
 
 let nondet_expr ~ctx ~add_annot ~type_ () : Expr.t Cs.with_body =
@@ -160,20 +169,30 @@ let nondet_expr ~ctx ~add_annot ~type_ () : Expr.t Cs.with_body =
     in
     Cs.map_l add_annot res
 
-let compile_cast ~ctx ~(from : GType.t) ~(into : GType.t) e :
+let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     Expr.t Cs.with_cmds =
-  match (from, into) with
-  | Bool, CInteger (I_bool | I_char | I_int) ->
-      let temp = Ctx.fresh_v ctx in
-      let value_of_bool =
-        Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.val_of_bool)
-      in
-      let call = Cmd.Call (temp, value_of_bool, [ e ], None, None) in
-      Cs.return ~app:[ call ] (Expr.PVar temp)
-  | _ ->
-      Error.unhandled
-        (Printf.sprintf "Cannot perform cast yet from %s into %s"
-           (GType.show from) (GType.show into))
+  let function_name =
+    match (from, into) with
+    | Bool, CInteger (I_bool | I_char | I_int) ->
+        Cgil_lib.CConstants.Internal_Functions.val_of_bool
+    | CInteger I_int, CInteger (I_size_t | I_ssize_t) ->
+        assert (ctx.machine.pointer_width == 64);
+        Cgil_lib.CConstants.UnOp_Functions.longofint
+    | CInteger I_int, Unsignedbv { width } when ctx.machine.int_width == width
+      -> Kconstants.Cast_functions.unsign_int
+    | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 64
+      -> Kconstants.Cast_functions.unsign_long
+    | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
+      -> Kconstants.Cast_functions.unsign_int
+    | _ ->
+        Error.unhandled
+          (Printf.sprintf "Cannot perform cast yet from %s into %s"
+             (GType.show from) (GType.show into))
+  in
+  let function_name = Expr.Lit (String function_name) in
+  let temp = Ctx.fresh_v ctx in
+  let call = Cmd.Call (temp, function_name, [ e ], None, None) in
+  Cs.return ~app:[ call ] (Expr.PVar temp)
 
 let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
   let open Cs.Syntax in
@@ -200,6 +219,16 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
       let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
       let lit = Gcu.Vt.gil_of_compcert (Gcu.Values.Vint i) in
       Cs.return (Expr.Lit lit)
+  | PointerConstant b ->
+      let i = Gcu.Camlcoq.Z.of_sint b in
+      let v =
+        match ctx.machine.pointer_width with
+        | 32 -> Gcu.Values.Vint i
+        | 64 -> Gcu.Values.Vlong i
+        | _ -> Error.unhandled "PointerConstant - unknown archi"
+      in
+      let lit = Gcu.Vt.gil_of_compcert v in
+      Cs.return (Expr.Lit lit)
   | IntConstant z ->
       let int_ty = Goto_lib.Type.as_int_type expr.type_ in
       let cz = Gcu.Vt.z_of_int z in
@@ -207,15 +236,13 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
         let open Gcu.Values in
         match int_ty with
         | I_int | I_char -> Vint cz
-        | I_size_t -> (
+        | I_size_t | I_ssize_t -> (
             match ctx.machine.pointer_width with
             | 32 -> Vint cz
             | 64 -> Vlong cz
             | _ ->
                 Error.unhandled
                   "Gillian only handles archi 32 and archi 64 for now")
-        | I_ssize_t ->
-            Error.unhandled "Lookup in compcert what kind of value ssize_t is"
         | I_bool -> Error.unexpected "IntConstant with type I_bool"
       in
       let lit = Gcu.Vt.gil_of_compcert ccert_value in
@@ -230,62 +257,32 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
 
       match op with
       | Not -> Expr.Infix.not e
-      | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op)
-      (* TODO: the following is not correct and might crash, I'm assuming the symbol name is the function name.
-         This could be a function pointer, in which case, it should go through the
-         global env thing *))
-  | FunctionCall { func; args } when is_assert_call func ->
-      (* The second argument of assert is a string that we may to keep
-         alive for error messages. For now we're discarding it.
-         In the future, we could change Gillian's assume to also have an error message *)
-      (* I should still find a way to factor out the call to assume and assert *)
-      let to_assert =
-        match args with
-        | [ to_assert; _msg ] -> to_assert
-        | _ -> Error.user_error "__CPROVER_assert not given 2 params"
-      in
-      (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
-      let cast_to_bool =
-        match to_assert.type_ with
-        | Bool -> false
-        | _ -> true
-      in
-      let* to_assert = compile_expr to_assert in
-      let* to_assert =
-        if cast_to_bool then
-          let temp = Ctx.fresh_v ctx in
-          let bool_of_value =
-            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
-          in
-          let call =
-            Cmd.Call (temp, bool_of_value, [ to_assert ], None, None)
-          in
-          Cs.return ~app:[ b call ] (Expr.PVar temp)
-        else Cs.return to_assert
-      in
-      let f =
-        match Formula.lift_logic_expr to_assert with
-        | None ->
-            Error.code_error
-              (Fmt.str "obtained weird expression that cannot be asserted: %a"
-                 Expr.pp to_assert)
-        | Some (f, _) -> f
-      in
-      Cs.return ~app:[ b (Logic (Assert f)) ] (Expr.Lit Null)
-  | FunctionCall { func; args } when is_assume_call func ->
+      | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op))
+  | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
+  | TypeCast to_cast ->
+      let* to_cast_e = compile_expr to_cast in
+      compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
+      |> Cs.map_l b
+  | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
+  | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
+  | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
+
+and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
+  let open Cs.Syntax in
+  match GExpr.as_symbol func with
+  | "__CPROVER_assume" ->
       let to_assume =
         match args with
         | [ to_assume ] -> to_assume
         | _ -> Error.user_error "__CPROVER_assume not given 1 params"
       in
       (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
-      (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
       let cast_to_bool =
         match to_assume.type_ with
         | Bool -> false
         | _ -> true
       in
-      let* to_assume = compile_expr to_assume in
+      let* to_assume = compile_expr ~ctx to_assume in
       let* to_assume =
         if cast_to_bool then
           let temp = Ctx.fresh_v ctx in
@@ -307,26 +304,60 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
         | Some (f, _) -> f
       in
       Cs.return ~app:[ b (Logic (Assume f)) ] (Expr.Lit Null)
-  | FunctionCall { func; args } when is_nondet_call func ->
-      let () =
+  | "__CPROVER_assert" ->
+      (* The second argument of assert is a string that we may to keep
+         alive for error messages. For now we're discarding it.
+         In the future, we could change Gillian's assume to also have an error message *)
+      (* I should still find a way to factor out the call to assume and assert *)
+      let to_assert =
         match args with
-        | [] -> ()
-        | _ ->
-            Error.user_error "You should not be passing arguments to __nondet!"
+        | [ to_assert; _msg ] -> to_assert
+        | _ -> Error.user_error "__CPROVER_assert not given 2 params"
       in
-      nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
-  | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
-  | FunctionCall { func; args } ->
+      (* I'm not sure it's always an int, I'll need to check, but there's a strong chance *)
+      let cast_to_bool =
+        match to_assert.type_ with
+        | Bool -> false
+        | _ -> true
+      in
+      let* to_assert = compile_expr ~ctx to_assert in
+      let* to_assert =
+        if cast_to_bool then
+          let temp = Ctx.fresh_v ctx in
+          let bool_of_value =
+            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
+          in
+          let call =
+            Cmd.Call (temp, bool_of_value, [ to_assert ], None, None)
+          in
+          Cs.return ~app:[ b call ] (Expr.PVar temp)
+        else Cs.return to_assert
+      in
+      let f =
+        match Formula.lift_logic_expr to_assert with
+        | None ->
+            Error.code_error
+              (Fmt.str "obtained weird expression that cannot be asserted: %a"
+                 Expr.pp to_assert)
+        | Some (f, _) -> f
+      in
+      Cs.return ~app:[ b (Logic (Assert f)) ] (Expr.Lit Null)
+  | _ ->
       let fname = GExpr.as_symbol func in
-      let* args = Cs.many compile_expr args in
+      let* args = Cs.many (compile_expr ~ctx) args in
       let ret_var = Ctx.fresh_v ctx in
       let gil_call = Cmd.Call (ret_var, Lit (String fname), args, None, None) in
       Cs.return ~app:[ b gil_call ] (Expr.PVar ret_var)
-  | TypeCast to_cast ->
-      let* to_cast_e = compile_expr to_cast in
-      compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
-      |> Cs.map_l b
-  | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
+
+and compile_assign ~ctx ~annot ~lhs ~rhs =
+  let v, pre1 = compile_expr ~ctx rhs in
+  let access, pre2 = Lvalue.as_access ~ctx ~read:false lhs in
+  let write =
+    match access with
+    | Direct x -> Cmd.Assignment (x, v)
+    | InMemoryScalar { ptr; _ } -> Memory.store_scalar ~ctx ptr v lhs.type_
+  in
+  (v, pre1 @ pre2 @ [ annot write ])
 
 let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let compile_statement = compile_statement ~ctx in
@@ -402,27 +433,117 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         in
         s @ [ b (Assignment (lhs, v)) ]
   | Assign { lhs; rhs } ->
-      let access, pre1 = Lvalue.as_access ~ctx ~read:false lhs in
-      let v, pre2 = compile_expr rhs in
-      let write =
-        match access with
-        | Direct x -> Cmd.Assignment (x, v)
-        | InMemoryScalar { ptr; _ } -> Memory.store_scalar ~ctx ptr v lhs.type_
-      in
-      pre1 @ pre2 @ [ b write ]
+      let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
+      body
   | Expression e ->
       let _, s = compile_expr e in
       s
+  | FunctionCall { lhs; func; args } -> (
+      let v, pre1 = compile_call ~ctx ~add_annot:b func args in
+      match lhs with
+      | None -> pre1
+      | Some lvalue ->
+          let access, pre2 = Lvalue.as_access ~ctx ~read:false lvalue in
+          let write =
+            match access with
+            | Direct x -> Cmd.Assignment (x, v)
+            | InMemoryScalar { ptr; _ } ->
+                Memory.store_scalar ~ctx ptr v lvalue.type_
+          in
+          pre1 @ pre2 @ [ b write ])
   | Switch _ -> Error.unhandled "switch statement"
+
+(* This is to be used without a current body.
+   Do not call fresh_v or fresh_lv inside *)
+let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
+  let b =
+    let loc = Body_item.compile_location gv.location in
+    let id = gv.location.origin_id in
+    Body_item.make ~loc ~id
+  in
+  (* We start by allocating the variable *)
+  let sz = Ctx.size_of ctx gv.type_ |> Expr.int in
+  let ll = "ll" in
+  let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
+  let action_cmd = b @@ Cmd.LAction (ll, alloc, [ Expr.zero_i; sz ]) in
+  let loc_expr = Expr.list_nth (Expr.PVar ll) 0 in
+  let loc = "loc" in
+  let assign_cmd = b @@ Cmd.Assignment (loc, loc_expr) in
+  let loc = Expr.PVar loc in
+  let store_zeros_cmd =
+    let store_zeros = Cgil_lib.CConstants.Internal_Functions.store_zeros in
+    b @@ Cmd.Call ("u", Lit (String store_zeros), [ loc; sz ], None, None)
+  in
+
+  let store_value_cmds =
+    match gv.value with
+    | None -> []
+    | Some e ->
+        let v, v_init_cmds = compile_expr ~ctx e in
+        let store_value =
+          Memory.store_scalar ~ctx ~var:"u"
+            (Expr.EList [ loc; Expr.zero_i ])
+            v gv.type_
+        in
+        v_init_cmds @ [ b store_value ]
+  in
+  let drom_perm_cmd =
+    let drom_perm = Cgil_lib.LActions.(str_ac (AMem DropPerm)) in
+    let perm_string =
+      Expr.Lit (String (Gcu.Vt.string_of_permission Writable))
+    in
+    b @@ Cmd.LAction ("u", drom_perm, [ loc; Expr.zero_i; sz; perm_string ])
+  in
+  let symexpr = Expr.Lit (String gv.symbol) in
+  let set_symbol_cmd =
+    let set_symbol = Cgil_lib.LActions.(str_ac (AGEnv SetSymbol)) in
+    b @@ Cmd.LAction ("u", set_symbol, [ symexpr; loc ])
+  in
+  let set_def_cmd =
+    let set_def = Cgil_lib.LActions.(str_ac (AGEnv SetDef)) in
+    b
+    @@ Cmd.LAction
+         ("u", set_def, [ loc; EList [ Lit (String "variable"); symexpr ] ])
+  in
+  [ action_cmd; assign_cmd; store_zeros_cmd ]
+  @ store_value_cmds
+  @ [ drom_perm_cmd; set_symbol_cmd; set_def_cmd ]
+  |> List.to_seq
+
+let set_global_env_proc (ctx : Ctx.t) =
+  let ctx = Ctx.with_new_generators ctx in
+  let variables = Hashtbl.to_seq_values ctx.prog.vars in
+  let body = Seq.concat_map (set_global_var ~ctx) variables in
+  let ret =
+    let b = Body_item.make in
+    let assign = b @@ Cmd.Assignment (Kutils.Names.return_variable, Lit Null) in
+    let ret = b Cmd.ReturnNormal in
+    Seq.cons assign (Seq.return ret)
+  in
+  let body = Seq.cons body (Seq.return ret) in
+  let body = Array.of_seq (Seq.concat body) in
+  Proc.
+    {
+      proc_name = Cgil_lib.CConstants.Internal_Functions.initialize_genv;
+      proc_source_path = None;
+      proc_internal = true;
+      proc_body = body;
+      proc_params = [];
+      proc_spec = None;
+    }
 
 let compile_free_locals (ctx : Ctx.t) =
   let open Kutils.Prelude in
-  let locals = Hashset.copy ctx.locals in
+  let locals = Hashtbl.copy ctx.locals in
   let () =
-    Hashset.filter_in_place locals (fun (local : Ctx.Local.t) ->
-        Ctx.in_memory ctx local.symbol)
+    Hashtbl.filter_map_inplace
+      (fun symbol (local : Ctx.Local.t) ->
+        if Ctx.in_memory ctx symbol then Some local else None)
+      locals
   in
-  Hashset.to_seq locals |> Seq.map (Memory.dealloc_local ~ctx) |> List.of_seq
+  Hashtbl.to_seq_values locals
+  |> Seq.map (Memory.dealloc_local ~ctx)
+  |> List.of_seq
 
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let f_loc = Body_item.compile_location func.location in
@@ -452,7 +573,18 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
-  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals) in
+  let init_call =
+    if func.symbol = "main" then
+      let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
+      [
+        Body_item.make
+          (Cmd.Call (Ctx.fresh_v ctx, Lit (String init_f), [], None, None));
+      ]
+    else []
+  in
+  let proc_body =
+    Array.of_list (init_call @ compile_statement ~ctx body @ free_locals)
+  in
   Proc.
     {
       proc_name = func.symbol;
@@ -471,6 +603,8 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
       (fun _ f prog -> Prog.add_proc prog (compile_function ~ctx:context f))
       program gil_prog
   in
+
+  let gil_prog = Prog.add_proc gil_prog (set_global_env_proc context) in
   assert (Machine_model.equal context.machine Machine_model.archi64);
   let imports =
     Kconstants.Imports.imports

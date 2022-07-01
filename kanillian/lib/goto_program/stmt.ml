@@ -6,6 +6,7 @@ type body =
   | Block of t list
   | Label of string * t list
   | Goto of string
+  | FunctionCall of { lhs : Expr.t option; func : Expr.t; args : Expr.t list }
   | Switch of { control : Expr.t; cases : switch_case list; default : t option }
   | Skip
   | Expression of Expr.t
@@ -24,6 +25,14 @@ let rec pp ft (t : t) =
           | Some e -> pf ft " = %a" Expr.pp e)
         value
   | Assign { lhs; rhs } -> pf ft "@[<h>%a = %a;@]" Expr.pp lhs Expr.pp rhs
+  | FunctionCall { lhs; func; args } ->
+      let pp_lhs ft lhs =
+        match lhs with
+        | None -> nop ft ()
+        | Some lhs -> pf ft "%a = " Expr.pp lhs
+      in
+      pf ft "@[<h>%a%a(%a);@]" pp_lhs lhs Expr.pp func (list ~sep:comma Expr.pp)
+        args
   | Assume { cond } -> pf ft "@[<h>assume(%a);@]" Expr.pp cond
   | Assert { cond; property_class } ->
       let pp_pc ft = function
@@ -107,7 +116,13 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       in
       let cases, default = switch_cases_of_irep ~machine content.sub in
       Switch { control; cases; default }
-  | _ -> Gerror.unhandled ~irep "statement"
+  | FunctionCall ->
+      let lhs, func, args = exactly_three ~msg:"FunctionCall stmt" irep in
+      let lhs = Lift_utils.lift_option expr_of_irep lhs in
+      let func = expr_of_irep func in
+      let args = List.map expr_of_irep args.sub in
+      FunctionCall { lhs; func; args }
+  | id -> Gerror.unhandled ~irep ("statement " ^ Id.to_string id)
 
 and switch_cases_of_irep ~machine l =
   let is_default irep =

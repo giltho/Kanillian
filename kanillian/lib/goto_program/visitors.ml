@@ -50,6 +50,9 @@ class ['a] iter =
     method visit_expr_value ~(ctx : 'a) ~type_:_ (ev : Expr.value) =
       match ev with
       | Array l | Struct l -> List.iter (self#visit_expr ~ctx) l
+      | Assign { lhs; rhs } ->
+          self#visit_expr ~ctx lhs;
+          self#visit_expr ~ctx rhs
       | FunctionCall { func; args } ->
           self#visit_expr ~ctx func;
           List.iter (self#visit_expr ~ctx) args
@@ -87,6 +90,10 @@ class ['a] iter =
       | Assign { lhs; rhs } ->
           self#visit_expr ~ctx lhs;
           self#visit_expr ~ctx rhs
+      | FunctionCall { lhs; func; args } ->
+          Option.iter (self#visit_expr ~ctx) lhs;
+          self#visit_expr ~ctx func;
+          List.iter (self#visit_expr ~ctx) args
       | Assume { cond } | Assert { cond; _ } -> self#visit_expr ~ctx cond
       | Label (_, l) | Block l -> List.iter (self#visit_stmt ~ctx) l
       | Expression e -> self#visit_expr ~ctx e
@@ -207,6 +214,11 @@ class ['a] map =
           let changed = ref false in
           let new_elems = map_mark_changed ~changed (self#visit_expr ~ctx) l in
           if not !changed then ev else Array new_elems
+      | Assign { lhs; rhs } ->
+          let new_lhs = self#visit_expr ~ctx lhs in
+          let new_rhs = self#visit_expr ~ctx rhs in
+          if new_lhs == lhs && new_rhs == rhs then ev
+          else Assign { lhs = new_lhs; rhs = new_rhs }
       | Struct l ->
           let changed = ref false in
           let new_elems = map_mark_changed ~changed (self#visit_expr ~ctx) l in
@@ -302,6 +314,15 @@ class ['a] map =
       | Return e ->
           let new_e = option_map_preserve (self#visit_expr ~ctx) e in
           if new_e == e then body else Return new_e
+      | FunctionCall { lhs; func; args } ->
+          let new_lhs = option_map_preserve (self#visit_expr ~ctx) lhs in
+          let new_func = self#visit_expr ~ctx func in
+          let changed = ref false in
+          let new_args =
+            map_mark_changed ~changed (self#visit_expr ~ctx) args
+          in
+          if new_lhs == lhs && new_func == func && not !changed then body
+          else FunctionCall { lhs = new_lhs; func = new_func; args = new_args }
       | Switch { control; cases; default } ->
           let new_control = self#visit_expr ~ctx control in
           let changed = ref false in

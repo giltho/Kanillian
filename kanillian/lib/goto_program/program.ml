@@ -1,3 +1,15 @@
+let should_be_filtered = function
+  (* The next 4 names contain arrays of size infinity.
+     We don't handle that for now, we don't know if that's necessary *)
+  | "__CPROVER_thread_key_dtors"
+  | "__CPROVER_thread_keys"
+  | "__CPROVER_memory"
+  | "__CPROVER_threads_exited" -> true
+  (* The following names usually contain unhandled irep.
+     In any case we don't use them yet. *)
+  | "__CPROVER_initialize" | "__CPROVER__start" -> true
+  | _ -> false
+
 module Global_var = struct
   type t = {
     type_ : Type.t;
@@ -36,7 +48,7 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
   in
   symtab
   |> Hashtbl.iter (fun name (sym : Irep_lib.Symbol.t) ->
-         if Sym_clean.is_cbmc_specific name || sym.is_file_local then ()
+         if sym.is_file_local || should_be_filtered name then ()
          else
            let () =
              if sym.is_weak || sym.is_volatile then
@@ -48,6 +60,11 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
            if sym.is_type then Hashtbl.add env.types name type_
            else
              match type_ with
+             | Bool ->
+                 (* We can't write pure bools in memory, so let's ignore these for now
+                    A solution would be to keep track of those, and convert them
+                    to and from u8 every time *)
+                 ()
              | Code { params; return_type } ->
                  let body =
                    match value with

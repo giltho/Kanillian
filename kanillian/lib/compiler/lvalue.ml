@@ -22,9 +22,22 @@ let rec as_access ~ctx ~read (e : GExpr.t) : access Cs.with_body =
   let as_access = as_access ~ctx ~read in
   match e.value with
   | Symbol x ->
-      if Ctx.in_memory ctx x then
-        Cs.return (InMemoryScalar { ptr = PVar x; loaded = None })
-      else (Direct x, [])
+      if Ctx.is_local ctx x then
+        if Ctx.in_memory ctx x then
+          Cs.return (InMemoryScalar { ptr = PVar x; loaded = None })
+        else (Direct x, [])
+      else
+        let genvlookup = Cgil_lib.LActions.(str_ac (AGEnv GetSymbol)) in
+        let sym_and_loc = Ctx.fresh_v ctx in
+        let act = Cmd.LAction (sym_and_loc, genvlookup, [ Lit (String x) ]) in
+        let ptr = Ctx.fresh_v ctx in
+        let assign =
+          Cmd.Assignment
+            (ptr, EList [ Expr.list_nth (PVar sym_and_loc) 1; Expr.zero_i ])
+        in
+        Cs.return
+          ~app:[ b act; b assign ]
+          (InMemoryScalar { ptr = PVar ptr; loaded = None })
   | Dereference e -> (
       let* ge = as_access e in
       match ge with

@@ -166,3 +166,21 @@ proc i__cbmc_binop_cmp_ne(v1, v2) {
         ret := not ir;
         return
 };
+
+proc i__cbmc_unsign_int(v1) {
+            goto [ l-nth(v1, 0i) = "int" ] iint unde;
+            (* I should actually be checking for bounds here,
+               but that's for later *)
+      iint: ret := v1;
+            return;
+      unde: fail[cast]("Using cast function for int on non-int elements")
+};
+ 
+ proc i__cbmc_unsign_long(v1) {
+            goto [ l-nth(v1, 0i) = "long" ] iint unde;
+            (* I should actually be checking for bounds here,
+               but that's for later *)
+      iint: ret := v1;
+            return;
+      unde: fail[cast]("Using cast function for long on non-long elements")
+};

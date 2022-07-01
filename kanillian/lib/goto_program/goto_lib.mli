@@ -174,6 +174,7 @@ module Expr : sig
     | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
     | ByteExtract of { e : t; offset : int }
     | Dereference of t
+    | Assign of { lhs : t; rhs : t }
     | UnOp of { op : Ops.Unary.t; e : t }
     | Struct of t list
     | Member of { lhs : t; field : string }
@@ -200,6 +201,7 @@ module Stmt : sig
     | Block of t list
     | Label of string * t list
     | Goto of string
+    | FunctionCall of { lhs : Expr.t option; func : Expr.t; args : Expr.t list }
     | Switch of {
         control : Expr.t;
         cases : switch_case list;
