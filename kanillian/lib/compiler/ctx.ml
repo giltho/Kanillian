@@ -100,6 +100,11 @@ let size_of ctx ty =
   | Gerror.Unexpected_irep (_, msg) -> Error.unexpected msg
   | Gerror.Unhandled_irep (_, msg) -> Error.unhandled msg
 
+let is_zst_access ctx (ty : Type.t) =
+  match ty with
+  | Bool -> false
+  | _ -> size_of ctx ty == 0
+
 let with_entering_body ctx stmt =
   let locals, in_memory = Local.gather ~prog:ctx.prog stmt in
   let fresh_v = Generators.temp_var () in

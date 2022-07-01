@@ -136,18 +136,8 @@ let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
       let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String tag) ]) in
       [ fail ]
   | _ ->
-      let ty_name =
-        match type_ with
-        | Constructor -> "constructor"
-        | Empty -> "empty"
-        | Array _ -> "array"
-        | Signedbv _ -> "signedbv"
-        | Unsignedbv _ -> "unsignedbv"
-        | Code _ -> "code"
-        | IncompleteStruct _ -> "incomplete_struct"
-        | _ -> Error.code_error "unreachable"
-      in
-      let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String ty_name) ]) in
+      let ty_str = GType.show type_ in
+      let fail = Cmd.Fail ("unhandled_nondet", [ Expr.Lit (String ty_str) ]) in
       [ fail ]
 
 let nondet_expr ~ctx ~add_annot ~type_ () : Expr.t Cs.with_body =
@@ -162,10 +152,12 @@ let nondet_expr ~ctx ~add_annot ~type_ () : Expr.t Cs.with_body =
        symbolic execution mode"
   else
     let res =
-      let* hash_x = Cs.return (Ctx.fresh_lv ctx) in
-      let* () = Cs.unit [ Cmd.Logic (LCmd.SpecVar [ hash_x ]) ] in
-      let+ () = assume_type ~ctx type_ hash_x in
-      Expr.LVar hash_x
+      if Ctx.is_zst_access ctx type_ then Cs.return (Expr.Lit Null)
+      else
+        let* hash_x = Cs.return (Ctx.fresh_lv ctx) in
+        let* () = Cs.unit [ Cmd.Logic (LCmd.SpecVar [ hash_x ]) ] in
+        let+ () = assume_type ~ctx type_ hash_x in
+        Expr.LVar hash_x
     in
     Cs.map_l add_annot res
 
@@ -200,72 +192,78 @@ let rec compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Expr.t Cs.with_body =
   let loc = Body_item.compile_location expr.location in
   let id = expr.location.origin_id in
   let b = Body_item.make ~loc ~id in
-  match expr.value with
-  | Symbol _ | Dereference _ | Index _ | Member _ -> (
-      let* access = Lvalue.as_access ~ctx ~read:true expr in
-      match access with
-      | Direct x -> Cs.return (Expr.PVar x)
-      | InMemoryScalar { loaded = Some e; _ } -> Cs.return e
-      | InMemoryScalar { loaded = None; ptr } ->
-          let+ var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
-          Expr.PVar var)
-  | AddressOf x -> (
-      let* access = Lvalue.as_access ~ctx ~read:true x in
-      match access with
-      | Direct x -> Error.code_error ("address of direct access to " ^ x)
-      | InMemoryScalar { ptr; _ } -> Cs.return ptr)
-  | BoolConstant b -> Cs.return (Expr.Lit (Bool b))
-  | CBoolConstant b ->
-      let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
-      let lit = Gcu.Vt.gil_of_compcert (Gcu.Values.Vint i) in
-      Cs.return (Expr.Lit lit)
-  | PointerConstant b ->
-      let i = Gcu.Camlcoq.Z.of_sint b in
-      let v =
-        match ctx.machine.pointer_width with
-        | 32 -> Gcu.Values.Vint i
-        | 64 -> Gcu.Values.Vlong i
-        | _ -> Error.unhandled "PointerConstant - unknown archi"
-      in
-      let lit = Gcu.Vt.gil_of_compcert v in
-      Cs.return (Expr.Lit lit)
-  | IntConstant z ->
-      let int_ty = Goto_lib.Type.as_int_type expr.type_ in
-      let cz = Gcu.Vt.z_of_int z in
-      let ccert_value =
-        let open Gcu.Values in
-        match int_ty with
-        | I_int | I_char -> Vint cz
-        | I_size_t | I_ssize_t -> (
-            match ctx.machine.pointer_width with
-            | 32 -> Vint cz
-            | 64 -> Vlong cz
-            | _ ->
-                Error.unhandled
-                  "Gillian only handles archi 32 and archi 64 for now")
-        | I_bool -> Error.unexpected "IntConstant with type I_bool"
-      in
-      let lit = Gcu.Vt.gil_of_compcert ccert_value in
-      Cs.return (Expr.Lit lit)
-  | BinOp { op; lhs; rhs } ->
-      let* e1 = compile_expr lhs in
-      let* e2 = compile_expr rhs in
-      let lty = lhs.type_ |> GType.as_int_type in
-      call_for_binop ~ctx ~lty op e1 e2 |> Cs.map_l b
-  | UnOp { op; e } -> (
-      let+ e = compile_expr e in
+  if Ctx.is_zst_access ctx expr.type_ then Cs.return (Expr.Lit Null)
+  else
+    match expr.value with
+    | Symbol _ | Dereference _ | Index _ | Member _ -> (
+        let* access = Lvalue.as_access ~ctx ~read:true expr in
+        match access with
+        | ZST -> Cs.return (Expr.Lit Null)
+        | Direct x -> Cs.return (Expr.PVar x)
+        | InMemoryScalar { loaded = Some e; _ } -> Cs.return e
+        | InMemoryScalar { loaded = None; ptr } ->
+            let+ var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
+            Expr.PVar var)
+    | AddressOf x -> (
+        let* access = Lvalue.as_access ~ctx ~read:true x in
+        match access with
+        | ZST ->
+            Cs.return
+              (Expr.EList [ Lit (String "dangling"); Lit (String "pointer") ])
+        | Direct x -> Error.code_error ("address of direct access to " ^ x)
+        | InMemoryScalar { ptr; _ } -> Cs.return ptr)
+    | BoolConstant b -> Cs.return (Expr.Lit (Bool b))
+    | CBoolConstant b ->
+        let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
+        let lit = Gcu.Vt.gil_of_compcert (Gcu.Values.Vint i) in
+        Cs.return (Expr.Lit lit)
+    | PointerConstant b ->
+        let i = Gcu.Camlcoq.Z.of_sint b in
+        let v =
+          match ctx.machine.pointer_width with
+          | 32 -> Gcu.Values.Vint i
+          | 64 -> Gcu.Values.Vlong i
+          | _ -> Error.unhandled "PointerConstant - unknown archi"
+        in
+        let lit = Gcu.Vt.gil_of_compcert v in
+        Cs.return (Expr.Lit lit)
+    | IntConstant z ->
+        let int_ty = Goto_lib.Type.as_int_type expr.type_ in
+        let cz = Gcu.Vt.z_of_int z in
+        let ccert_value =
+          let open Gcu.Values in
+          match int_ty with
+          | I_int | I_char -> Vint cz
+          | I_size_t | I_ssize_t -> (
+              match ctx.machine.pointer_width with
+              | 32 -> Vint cz
+              | 64 -> Vlong cz
+              | _ ->
+                  Error.unhandled
+                    "Gillian only handles archi 32 and archi 64 for now")
+          | I_bool -> Error.unexpected "IntConstant with type I_bool"
+        in
+        let lit = Gcu.Vt.gil_of_compcert ccert_value in
+        Cs.return (Expr.Lit lit)
+    | BinOp { op; lhs; rhs } ->
+        let* e1 = compile_expr lhs in
+        let* e2 = compile_expr rhs in
+        let lty = lhs.type_ |> GType.as_int_type in
+        call_for_binop ~ctx ~lty op e1 e2 |> Cs.map_l b
+    | UnOp { op; e } -> (
+        let+ e = compile_expr e in
 
-      match op with
-      | Not -> Expr.Infix.not e
-      | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op))
-  | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
-  | TypeCast to_cast ->
-      let* to_cast_e = compile_expr to_cast in
-      compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
-      |> Cs.map_l b
-  | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
-  | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
-  | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
+        match op with
+        | Not -> Expr.Infix.not e
+        | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op))
+    | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
+    | TypeCast to_cast ->
+        let* to_cast_e = compile_expr to_cast in
+        compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e
+        |> Cs.map_l b
+    | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
+    | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
+    | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
 
 and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
   let open Cs.Syntax in
@@ -354,10 +352,12 @@ and compile_assign ~ctx ~annot ~lhs ~rhs =
   let access, pre2 = Lvalue.as_access ~ctx ~read:false lhs in
   let write =
     match access with
-    | Direct x -> Cmd.Assignment (x, v)
-    | InMemoryScalar { ptr; _ } -> Memory.store_scalar ~ctx ptr v lhs.type_
+    | ZST -> []
+    | Direct x -> [ annot (Cmd.Assignment (x, v)) ]
+    | InMemoryScalar { ptr; _ } ->
+        [ annot (Memory.store_scalar ~ctx ptr v lhs.type_) ]
   in
-  (v, pre1 @ pre2 @ [ annot write ])
+  (v, pre1 @ pre2 @ write)
 
 let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let compile_statement = compile_statement ~ctx in
@@ -446,11 +446,12 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
           let access, pre2 = Lvalue.as_access ~ctx ~read:false lvalue in
           let write =
             match access with
-            | Direct x -> Cmd.Assignment (x, v)
+            | ZST -> []
+            | Direct x -> [ b (Cmd.Assignment (x, v)) ]
             | InMemoryScalar { ptr; _ } ->
-                Memory.store_scalar ~ctx ptr v lvalue.type_
+                [ b (Memory.store_scalar ~ctx ptr v lvalue.type_) ]
           in
-          pre1 @ pre2 @ [ b write ])
+          pre1 @ pre2 @ write)
   | Switch _ -> Error.unhandled "switch statement"
 
 (* This is to be used without a current body.

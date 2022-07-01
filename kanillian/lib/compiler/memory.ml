@@ -47,7 +47,9 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
   | Float -> Float32
   | Double -> Float64
   | Pointer _ -> int_chuck_for ~signed:false ~size:ctx.machine.pointer_width
-  | _ -> Error.code_error "chunk_for_type: received a type that is not a unit"
+  | _ ->
+      Error.code_error
+        ("chunk_for_type: received a type that is not a scalar " ^ GType.show t)
 
 (** Should only be called for a local that is in memory*)
 let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
