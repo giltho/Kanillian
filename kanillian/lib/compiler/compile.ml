@@ -407,7 +407,11 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   | Decl { lhs; value } ->
       let ty = lhs.type_ in
       let lhs = GExpr.as_symbol lhs in
-      if Ctx.in_memory ctx lhs then
+      (* ZSTs are just (GIL) Null values *)
+      if Ctx.is_zst_access ctx ty then
+        let cmd = Cmd.Assignment (lhs, Lit Null) in
+        [ b cmd ]
+      else if Ctx.in_memory ctx lhs then
         let loc = Ctx.fresh_v ctx in
         let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
         let size = Ctx.size_of ctx ty in
@@ -466,7 +470,7 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
   let sz = Ctx.size_of ctx gv.type_ |> Expr.int in
   let ll = "ll" in
   let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
-  let action_cmd = b @@ Cmd.LAction (ll, alloc, [ Expr.zero_i; sz ]) in
+  let alloc_cmd = b @@ Cmd.LAction (ll, alloc, [ Expr.zero_i; sz ]) in
   let loc_expr = Expr.list_nth (Expr.PVar ll) 0 in
   let loc = "loc" in
   let assign_cmd = b @@ Cmd.Assignment (loc, loc_expr) in
@@ -506,10 +510,17 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
     @@ Cmd.LAction
          ("u", set_def, [ loc; EList [ Lit (String "variable"); symexpr ] ])
   in
-  [ action_cmd; assign_cmd; store_zeros_cmd ]
-  @ store_value_cmds
-  @ [ drom_perm_cmd; set_symbol_cmd; set_def_cmd ]
-  |> List.to_seq
+  (* If the value is a ZST, it needs to exist in the
+     global environment, but doesn't have to be allocated.
+     TODO: add tests for this kind of behaviour - a global variable
+     that is ZST. *)
+  if Ctx.is_zst_access ctx gv.type_ then
+    [ set_symbol_cmd; set_def_cmd ] |> List.to_seq
+  else
+    [ alloc_cmd; assign_cmd; store_zeros_cmd ]
+    @ store_value_cmds
+    @ [ drom_perm_cmd; set_symbol_cmd; set_def_cmd ]
+    |> List.to_seq
 
 let set_global_env_proc (ctx : Ctx.t) =
   let ctx = Ctx.with_new_generators ctx in

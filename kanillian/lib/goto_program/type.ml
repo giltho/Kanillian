@@ -153,8 +153,13 @@ let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   | Signedbv { width } | Unsignedbv { width } -> width
   | Empty -> 0
   | StructTag x | UnionTag x -> bit_size_of (tag_lookup x)
-  | Struct { components = []; _ } -> 0
-  | Struct _ -> Gerror.unhandled ("bit_size_of non-empty Struct " ^ show t)
+  | Struct { components; _ } ->
+      let dc_bit_size (dc : Typedefs__.datatype_component) =
+        match dc with
+        | Field { type_; _ } -> bit_size_of type_
+        | Padding { bits; _ } -> bits
+      in
+      List.fold_left (fun x y -> x + dc_bit_size y) 0 components
   | Union _ -> Gerror.unhandled "bit_size_of Union"
   | Bool -> Gerror.code_error "bit_size_of Bool"
   | Code _ -> Gerror.code_error "bit_size_of Code"
