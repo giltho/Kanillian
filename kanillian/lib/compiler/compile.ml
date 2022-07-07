@@ -134,7 +134,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       match lhs with
       | None -> pre1
       | Some lvalue ->
-          let access, pre2 = Lvalue.as_access ~ctx ~read:false lvalue in
+          let access, pre2 = lvalue_as_access ~ctx ~read:false lvalue in
           let write =
             match (access, v) with
             | ZST, _ -> []
@@ -147,7 +147,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
                 Error.code_error
                   (Fmt.str
                      "Wrong mix of access and value kind for function call:\n\
-                      %a = %a" Lvalue.pp_access access Val_repr.pp v)
+                      %a = %a" pp_access access Val_repr.pp v)
           in
           pre1 @ pre2 @ write)
   | Switch { control; cases; default } ->

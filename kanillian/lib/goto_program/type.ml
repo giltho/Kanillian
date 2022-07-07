@@ -15,8 +15,8 @@ type t = Typedefs__.type_ =
   | UnionTag of string
   | Constructor
   | Empty
-[@@deriving show { with_path = false }]
 
+let show t = Typedefs__.show_type_ t
 let pp fmt t = Typedefs__.pp_type_ fmt t
 let equal ta tb = Typedefs__.equal_type_ ta tb
 
