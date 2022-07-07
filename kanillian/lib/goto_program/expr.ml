@@ -22,6 +22,8 @@ type value =
 and t = { value : value; type_ : Type.t; location : Location.t }
 [@@deriving show { with_path = false }]
 
+let pp_full = pp
+
 let pp ft t =
   let rec pp ft t =
     let open Fmt in

@@ -4,6 +4,13 @@ type ('a, 'b) with_list = 'a * 'b list
 type 'a with_cmds = ('a, string Gil_syntax.Cmd.t) with_list
 type 'a with_body = ('a, Body_item.t) with_list
 
+(* Slightly optimising here, quite often we're gonna add "nothing", so we might as well
+   not be in O(size(l1)) *)
+let ( @ ) l1 l2 =
+  match l2 with
+  | [] -> l1
+  | _ -> l1 @ l2
+
 let bind ((x, l) : ('a, 'c) with_list) (f : 'a -> ('b, 'c) with_list) :
     ('b, 'c) with_list =
   let x', l' = f x in

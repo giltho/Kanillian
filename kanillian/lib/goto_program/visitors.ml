@@ -166,7 +166,12 @@ class ['a] map =
       | CInteger int_ty ->
           let new_int_ty = self#visit_int_type ~ctx int_ty in
           if new_int_ty == int_ty then type_ else CInteger new_int_ty
-      | Array (t, _) | Pointer t -> self#visit_type ~ctx t
+      | Array (t, sz) ->
+          let new_t = self#visit_type ~ctx t in
+          if new_t == t then type_ else Array (new_t, sz)
+      | Pointer t ->
+          let new_t = self#visit_type ~ctx t in
+          if new_t == t then type_ else Pointer new_t
       | Code { params; return_type } ->
           let changed = ref false in
           let new_params =

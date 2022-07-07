@@ -18,6 +18,7 @@ type t = Typedefs__.type_ =
 [@@deriving show { with_path = false }]
 
 let pp fmt t = Typedefs__.pp_type_ fmt t
+let equal ta tb = Typedefs__.equal_type_ ta tb
 
 let is_function = function
   | Code _ -> true (* Will also be true for variadic code if ever *)
@@ -77,11 +78,8 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
       let return_type = of_irep (irep $ ReturnType) in
       Code { params; return_type }
   | Pointer ->
-      let points_to =
-        match irep.sub with
-        | [ ty ] -> of_irep ty
-        | _ -> failwith "Pointer type has more than one operands"
-      in
+      let points_to = Lift_utils.exactly_one ~msg:"Pointer type" irep in
+      let points_to = of_irep points_to in
       Pointer points_to
   | Struct ->
       let incomplete =
@@ -141,6 +139,7 @@ let as_int_type = function
 
 (** Returns the size of a type in bits *)
 let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
+  let dc_bit_size = bit_size_of_datatype_component ~machine ~tag_lookup in
   let bit_size_of = bit_size_of ~tag_lookup ~machine in
   match t with
   | Array (ty, sz) -> sz * bit_size_of ty
@@ -154,17 +153,47 @@ let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   | Empty -> 0
   | StructTag x | UnionTag x -> bit_size_of (tag_lookup x)
   | Struct { components; _ } ->
-      let dc_bit_size (dc : Typedefs__.datatype_component) =
-        match dc with
-        | Field { type_; _ } -> bit_size_of type_
-        | Padding { bits; _ } -> bits
-      in
       List.fold_left (fun x y -> x + dc_bit_size y) 0 components
-  | Union _ -> Gerror.unhandled "bit_size_of Union"
+  | Union { components; _ } ->
+      (* I don't have to think about aligning everything on the biggest alignment,
+         because Kani sends padding fields when necessary *)
+      List.fold_left (fun x y -> max x (dc_bit_size y)) 0 components
   | Bool -> Gerror.code_error "bit_size_of Bool"
   | Code _ -> Gerror.code_error "bit_size_of Code"
   | Constructor -> Gerror.code_error "bit_size_of Constructor"
   | IncompleteStruct _ -> Gerror.code_error "bit_size_of IncompleteStruct"
 
+and bit_size_of_datatype_component
+    ~machine
+    ~tag_lookup
+    (dc : Typedefs__.datatype_component) =
+  match dc with
+  | Field { type_; _ } -> bit_size_of ~machine ~tag_lookup type_
+  | Padding { bits; _ } -> bits
+
 (** Returns the size of a type in bytes *)
 let size_of ~machine ~tag_lookup t = bit_size_of ~machine ~tag_lookup t / 8
+
+let rec bit_offset_struct_field ~machine ~tag_lookup ty field =
+  let rec aux acc (components : Typedefs__.datatype_component list) =
+    match components with
+    | [] -> Gerror.unexpected "missing field for structure!"
+    | Field { name; type_ } :: r ->
+        if name = field then acc
+        else
+          let acc = bit_size_of ~machine ~tag_lookup type_ in
+          aux acc r
+    | Padding { name; bits } :: r ->
+        if name = field then acc
+        else
+          let acc = bits + acc in
+          aux acc r
+  in
+  match ty with
+  | Struct { components; _ } -> aux 0 components
+  | StructTag s ->
+      bit_offset_struct_field ~machine ~tag_lookup (tag_lookup s) field
+  | _ -> Gerror.code_error "bit_offset_struct_field for non-struct"
+
+let offset_struct_field ~machine ~tag_lookup ty field =
+  bit_offset_struct_field ~machine ~tag_lookup ty field / 8

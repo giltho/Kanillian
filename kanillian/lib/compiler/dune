@@ -1,4 +1,6 @@
 (library
  (name kanillian_compiler)
  (libraries gillian yojson irep_lib kutils goto_lib cgil_lib compcert)
- (flags :standard -open Goto_lib))
+ (flags :standard -open Goto_lib)
+ (preprocess
+  (pps ppx_deriving.std)))

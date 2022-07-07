@@ -1,4 +1,5 @@
 module GExpr = Goto_lib.Expr
+module GType = Goto_lib.Type
 open Gil_syntax
 
 (** Represents how a value is accessed.
@@ -9,24 +10,31 @@ open Gil_syntax
     the chunk *)
 type access =
   | InMemoryScalar of { ptr : Expr.t; loaded : Expr.t option }
+  | InMemoryComposit of { ptr : Expr.t; type_ : GType.t }
+      (** For copy, we just need the size, not the type.
+          However, in the future, we might copy fields
+          one-by-one to preserve the correct semantics of C *)
   | Direct of string
   | ZST
+[@@deriving show { with_path = false }]
 
-let rec as_access ~ctx ~read (e : GExpr.t) : access Cs.with_body =
-  if Ctx.is_zst_access ctx e.type_ then Cs.return ZST
+let rec as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
+  if Ctx.is_zst_access ctx lvalue.type_ then Cs.return ZST
   else
     let open Cs.Syntax in
     let b =
       Body_item.make
-        ~loc:(Body_item.compile_location e.location)
-        ~id:e.location.origin_id
+        ~loc:(Body_item.compile_location lvalue.location)
+        ~id:lvalue.location.origin_id
     in
     let lift x = Cs.map_l b x in
     let as_access = as_access ~ctx ~read in
-    match e.value with
+    match lvalue.value with
     | Symbol x ->
         if Ctx.is_local ctx x then
-          if Ctx.in_memory ctx x then
+          if not (Ctx.representable_in_store ctx lvalue.type_) then
+            Cs.return (InMemoryComposit { ptr = PVar x; type_ = lvalue.type_ })
+          else if Ctx.in_memory ctx x then
             Cs.return (InMemoryScalar { ptr = PVar x; loaded = None })
           else (Direct x, [])
         else
@@ -38,15 +46,19 @@ let rec as_access ~ctx ~read (e : GExpr.t) : access Cs.with_body =
             Cmd.Assignment
               (ptr, EList [ Expr.list_nth (PVar sym_and_loc) 1; Expr.zero_i ])
           in
-          Cs.return
-            ~app:[ b act; b assign ]
-            (InMemoryScalar { ptr = PVar ptr; loaded = None })
+          if Ctx.representable_in_store ctx lvalue.type_ then
+            Cs.return
+              ~app:[ b act; b assign ]
+              (InMemoryScalar { ptr = PVar ptr; loaded = None })
+          else
+            Cs.return
+              (InMemoryComposit { ptr = PVar ptr; type_ = lvalue.type_ })
     | Dereference e -> (
         let* ge = as_access e in
         match ge with
         | Direct x ->
             (* We do read the memory, but it might be a "fake read".
-               We don't necessarily need the value if we're going to dereference it
+               We don't necessarily need the value if we're going get its address
                 (i.e &*p). Therefore, we keep both the value and the pointer around. *)
             let ge = Expr.PVar x in
             if read then
@@ -67,10 +79,36 @@ let rec as_access ~ctx ~read (e : GExpr.t) : access Cs.with_body =
               let+ v = Memory.load_scalar ~ctx loaded e.type_ |> lift in
               InMemoryScalar { ptr = loaded; loaded = Some (PVar v) }
             else Cs.return (InMemoryScalar { ptr = loaded; loaded = None })
+        | InMemoryComposit _ ->
+            Error.code_error
+              "Dereferencing a composit values. Pointers are scalars, that \
+               should never happen."
         | ZST -> Error.code_error "Dereferencing a ZST?")
     (* Not sure about those 2 actually.
        The parameter in there, is it a pointer? *)
-    | Index _ -> Error.unhandled "array index lvalue"
-    | Member _ -> Error.unhandled "member lvalue"
+    | Index _ ->
+        (* Oh no! this is trivial to implement, but I have to
+           call compile_expr, that's circular dependencies... *)
+        Error.unhandled "array index lvalue"
+    | Member { lhs; field } ->
+        let* lhs_access = as_access lhs in
+        let ptr, lhs_ty =
+          match lhs_access with
+          | InMemoryComposit { ptr; type_ } -> (ptr, type_)
+          | _ -> Error.code_error "Structure access is not in-memory-composit"
+        in
+        (* TODO:
+           I have the function to compute the offset in bits,
+           I just need to do the pointer arithmetics and return the right valu
+           either composit or scalar, but in memory in any case *)
+        let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
+        let ptr = Memory.ptr_add ptr field_offset in
+        if Ctx.representable_in_store ctx lvalue.type_ then
+          (* I might have to perform the read here,
+             in case fake-read is necessary *)
+          Cs.return (InMemoryScalar { ptr; loaded = None })
+        else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
     | _ ->
-        Error.unexpected "Lvalue.as_access for something that isn't an lvalue"
+        Error.code_error
+          (Fmt.str "Lvalue.as_access for something that isn't an lvalue: %a"
+             GExpr.pp_full lvalue)

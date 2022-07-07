@@ -51,6 +51,36 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
       Error.code_error
         ("chunk_for_type: received a type that is not a scalar " ^ GType.show t)
 
+let ptr_add p i =
+  let loc = Expr.list_nth p 0 in
+  let offset = Expr.list_nth p 1 in
+  let open Expr.Infix in
+  Expr.EList [ loc; offset + Expr.int i ]
+
+(* Allocates the memory with the right size, and
+   returns a location expression, addressing the block *)
+let alloc ~loc_var ~size : Expr.t * string Cmd.t =
+  let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
+  let cmd = Cmd.LAction (loc_var, alloc, [ Expr.zero_i; Expr.int size ]) in
+  let loc = Expr.list_nth (PVar loc_var) 0 in
+  (loc, cmd)
+
+(* Allocates the memory with the right size, and
+   returns a pointer expression pointing to the
+   beginning of the allocated block. *)
+let alloc_ptr ~ctx ty : Expr.t * string Cmd.t =
+  let size = Ctx.size_of ctx ty in
+  let loc, cmd = alloc ~loc_var:(Ctx.fresh_v ctx) ~size in
+  let ptr = Expr.EList [ loc; Expr.zero_i ] in
+  (ptr, cmd)
+
+let alloc_temp ~ctx ~location ty : Expr.t Cs.with_cmds =
+  let ptr, alloc_cmd = alloc_ptr ~ctx ty in
+  let temp = Ctx.fresh_v ctx in
+  let assign = Cmd.Assignment (temp, ptr) in
+  let () = Ctx.register_allocated_temp ctx ~name:temp ~type_:ty ~location in
+  Cs.return ~app:[ alloc_cmd; assign ] (Expr.PVar temp)
+
 (** Should only be called for a local that is in memory*)
 let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
   if not (Ctx.in_memory ctx l.symbol) then

@@ -27,4 +27,4 @@ and param = {
 and datatype_component =
   | Field of { name : string; type_ : type_ }
   | Padding of { name : string; bits : int }
-[@@deriving show { with_path = false }]
+[@@deriving show { with_path = false }, eq]

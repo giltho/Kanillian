@@ -26,3 +26,9 @@ let unexpected s = raise (UnexpectedGoto s)
 let unhandled s = raise (UnhandledGoto s)
 let code_error s = raise (Code_error s)
 let user_error s = raise (User_error s)
+
+let rethrow_gerror f =
+  try f () with
+  | Gerror.Code_error (_, msg) -> code_error msg
+  | Gerror.Unexpected_irep (_, msg) -> unexpected msg
+  | Gerror.Unhandled_irep (_, msg) -> unhandled msg

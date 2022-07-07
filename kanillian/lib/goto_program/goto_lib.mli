@@ -105,7 +105,8 @@ module Location : sig
 end
 
 module IntType : sig
-  type t = I_bool | I_char | I_int | I_size_t | I_ssize_t [@@deriving show]
+  type t = I_bool | I_char | I_int | I_size_t | I_ssize_t
+  [@@deriving show, eq]
 
   module Bv_encoding : sig
     type int_type = t
@@ -154,9 +155,13 @@ and Type : sig
     | UnionTag of string
     | Constructor
     | Empty
-  [@@deriving show]
+  [@@deriving show, eq]
 
   val size_of : machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> int
+
+  val offset_struct_field :
+    machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> string -> int
+
   val is_function : t -> bool
   val as_int_type : t -> IntType.t
   val of_irep : machine:Machine_model.t -> Irep.t -> t
@@ -187,6 +192,7 @@ module Expr : sig
   and t = { value : value; type_ : Type.t; location : Location.t }
   [@@deriving show]
 
+  val pp_full : Format.formatter -> t -> unit
   val as_symbol : t -> string
   val value_of_irep : machine:Machine_model.t -> type_:Type.t -> Irep.t -> value
   val of_irep : machine:Machine_model.t -> Irep.t -> t

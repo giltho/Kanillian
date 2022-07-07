@@ -12,6 +12,21 @@ let compile_location (loc : Goto_lib.Location.t) =
       let loc_end = Location.{ pos_line; pos_column = pos_column + 2 } in
       Location.{ loc_source = source; loc_start; loc_end }
 
+let get_or_set_fresh_lab ~ctx list =
+  match list with
+  | [] -> Error.code_error "get_or_set_fresh_lab for empty body"
+  | (a, None, b) :: r ->
+      let lab = Ctx.fresh_lab ctx in
+      (lab, (a, Some lab, b) :: r)
+  | (_, Some lab, _) :: _ -> (lab, list)
+
 let make ?loop ?label ?loc ?id cmd : t =
   let annot = Annot.make ?origin_loc:loc ?origin_id:id ?loop_info:loop () in
   (annot, label, cmd)
+
+let make_hloc ?loop ?label ?loc cmd : t =
+  let origin_loc = Option.map compile_location loc in
+  let origin_id =
+    Option.map (fun (l : Goto_lib.Location.t) -> l.origin_id) loc
+  in
+  make ?loop ?label ?loc:origin_loc ?id:origin_id cmd

@@ -3,6 +3,8 @@ module Comp_functions = struct
   let cmpl_ge = "i__cbmc_binop_cmpl_ge"
   let cmpl_lt = "i__cbmc_binop_cmpl_lt"
   let cmpl_eq = "i__cbmc_binop_cmpl_eq"
+  let cmpl_ne = "i__cbmc_binop_cmpl_ne"
+  let cmpl_gt = "i__cmbc_binop_cmpl_gt"
   let cmpu_le = "i__cbmc_binop_cmpu_le"
   let cmpu_gt = "i__cbmc_binop_cmpu_gt"
   let cmpu_ne = "i__cbmc_binop_cmpu_ne"
@@ -23,6 +25,14 @@ module Comp_functions = struct
   let cmp_le = "i__cbmc_binop_cmp_le"
   let cmp_eq = "i__cbmc_binop_cmp_eq"
   let cmp_ne = "i__cbmc_binop_cmp_ne"
+end
+
+module Binop_functions = struct
+  (* We override it, because we know it cannot be a pointer *)
+  open Cgil_lib.CConstants.BinOp_Functions
+
+  let addl = "i__cbmc_binop_addl"
+  let add = add
 end
 
 module Cast_functions = struct
