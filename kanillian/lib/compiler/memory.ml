@@ -51,11 +51,17 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
       Error.code_error
         ("chunk_for_type: received a type that is not a scalar " ^ GType.show t)
 
-let ptr_add p i =
+let ptr_add_e p e =
   let loc = Expr.list_nth p 0 in
   let offset = Expr.list_nth p 1 in
   let open Expr.Infix in
-  Expr.EList [ loc; offset + Expr.int i ]
+  Expr.EList [ loc; offset + e ]
+
+let ptr_add p i = ptr_add_e p (Expr.int i)
+
+let ptr_add_v p v =
+  let v = Expr.list_nth v 1 in
+  ptr_add_e p v
 
 (* Allocates the memory with the right size, and
    returns a location expression, addressing the block *)

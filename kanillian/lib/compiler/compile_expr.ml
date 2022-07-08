@@ -15,9 +15,10 @@ type access =
 
 (* This file is a mess of mutually-recursive functions *)
 
-let call_for_binop
+let compile_binop
     ~(ctx : Ctx.t)
     ~(lty : GType.t)
+    ~(rty : GType.t)
     (binop : Ops.Binary.t)
     (e1 : Val_repr.t)
     (e2 : Val_repr.t) : Expr.t Cs.with_cmds =
@@ -25,69 +26,77 @@ let call_for_binop
      then we'll figure out a bit more.
      This is for size_t and pointer operations. *)
   assert (Machine_model.equal Machine_model.archi64 ctx.machine);
-  let internal_function =
+  let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
     let open Kconstants.Comp_functions in
     let open Kconstants.Binop_functions in
     match binop with
     | Equal -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_eq
-        | CInteger I_bool -> cmpu_eq
-        | CInteger I_size_t -> cmplu_eq
-        | CInteger I_ssize_t -> cmpl_eq
+        | CInteger (I_int | I_char) -> `Proc cmp_eq
+        | CInteger I_bool -> `Proc cmpu_eq
+        | CInteger I_size_t -> `Proc cmplu_eq
+        | CInteger I_ssize_t -> `Proc cmpl_eq
         | _ -> Error.unhandled (Fmt.str "binop == for type %a" GType.pp lty))
     | Notequal -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_ne
-        | CInteger I_bool -> cmpu_ne
-        | CInteger I_size_t -> cmplu_ne
-        | CInteger I_ssize_t -> cmpl_ne
+        | CInteger (I_int | I_char) -> `Proc cmp_ne
+        | CInteger I_bool -> `Proc cmpu_ne
+        | CInteger I_size_t -> `Proc cmplu_ne
+        | CInteger I_ssize_t -> `Proc cmpl_ne
         | _ -> Error.unhandled (Fmt.str "binop != for type %a" GType.pp lty))
     | Le -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_le
-        | CInteger I_bool -> cmpu_le
-        | CInteger I_size_t -> cmplu_le
-        | CInteger I_ssize_t -> cmpl_le
+        | CInteger (I_int | I_char) -> `Proc cmp_le
+        | CInteger I_bool -> `Proc cmpu_le
+        | CInteger I_size_t -> `Proc cmplu_le
+        | CInteger I_ssize_t -> `Proc cmpl_le
         | _ -> Error.unhandled (Fmt.str "binop <= for type %a" GType.pp lty))
     | Lt -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_lt
-        | CInteger I_bool -> cmpu_lt
-        | CInteger I_size_t -> cmplu_lt
-        | CInteger I_ssize_t -> cmpl_lt
-        | _ -> Error.unhandled "binop < for type " ^ GType.show lty)
+        | CInteger (I_int | I_char) -> `Proc cmp_lt
+        | CInteger I_bool -> `Proc cmpu_lt
+        | CInteger I_size_t -> `Proc cmplu_lt
+        | CInteger I_ssize_t -> `Proc cmpl_lt
+        | _ -> Error.unhandled (Fmt.str "binop < for type %a" GType.pp lty))
     | Gt -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_gt
-        | CInteger I_bool -> cmpu_gt
-        | CInteger I_size_t -> cmplu_gt
-        | CInteger I_ssize_t -> cmpl_gt
-        | _ -> Error.unhandled "binop < for type " ^ GType.show lty)
+        | CInteger (I_int | I_char) -> `Proc cmp_gt
+        | CInteger I_bool -> `Proc cmpu_gt
+        | CInteger I_size_t -> `Proc cmplu_gt
+        | CInteger I_ssize_t -> `Proc cmpl_gt
+        | _ -> Error.unhandled (Fmt.str "binop > for type %a" GType.pp lty))
     | Ge -> (
         match lty with
-        | CInteger (I_int | I_char) -> cmp_ge
-        | CInteger I_bool -> cmpu_ge
-        | CInteger I_size_t -> cmplu_ge
-        | CInteger I_ssize_t -> cmpl_ge
+        | CInteger (I_int | I_char) -> `Proc cmp_ge
+        | CInteger I_bool -> `Proc cmpu_ge
+        | CInteger I_size_t -> `Proc cmplu_ge
+        | CInteger I_ssize_t -> `Proc cmpl_ge
         | _ -> Error.unhandled (Fmt.str "binop >= for type %a" GType.pp lty))
     | Plus -> (
-        match lty with
-        | CInteger (I_int | I_char) -> add
-        | CInteger I_bool -> add
-        | CInteger I_size_t -> addl
-        | CInteger I_ssize_t -> addl
+        match (lty, rty) with
+        | CInteger I_int, CInteger I_int -> `Proc add
+        | CInteger I_bool, CInteger I_bool -> `Proc add
+        | CInteger I_size_t, CInteger I_size_t -> `Proc addl
+        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc addl
+        (* For pointer addition, I'm not checking that the pointer is not null.
+           That's a bug we've caught in the past... *)
+        | CInteger (I_size_t | I_ssize_t), Pointer _ ->
+            `App (fun num ptr -> Memory.ptr_add_v ptr num)
+        | Pointer _, CInteger (I_size_t | I_ssize_t) -> `App Memory.ptr_add_v
         | _ -> Error.unhandled (Fmt.str "binop + for type %a" GType.pp lty))
     | _ -> Error.unhandled (Fmt.str "binary operator: %a" Ops.Binary.pp binop)
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
-  let gvar = Ctx.fresh_v ctx in
-  let call =
-    Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
-  in
-  Cs.return ~app:[ call ] (Expr.PVar gvar)
+  match compile_with with
+  | `Proc internal_function ->
+      let gvar = Ctx.fresh_v ctx in
+      let call =
+        Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
+      in
+      Cs.return ~app:[ call ] (Expr.PVar gvar)
+  | `App f -> Cs.return (f e1 e2)
 
 let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
   let llvar = Expr.LVar lvar in
@@ -536,7 +545,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         let* e1 = compile_expr lhs in
         let* e2 = compile_expr rhs in
         let lty = lhs.type_ in
-        let+ e = call_for_binop ~ctx ~lty op e1 e2 |> Cs.map_l b in
+        let rty = rhs.type_ in
+        let+ e = compile_binop ~ctx ~lty ~rty op e1 e2 |> Cs.map_l b in
         Val_repr.ByValue e
     | UnOp { op; e } -> (
         let* e = compile_expr e in

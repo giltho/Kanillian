@@ -165,7 +165,8 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
             let guard = case.Stmt.case in
             let guard_e, guard_s = compile_expr guard in
             let equal_v, comparison_calls =
-              call_for_binop ~ctx ~lty:control_ty Equal control guard_e
+              compile_binop ~ctx ~lty:control_ty ~rty:guard.type_ Equal control
+                guard_e
             in
             let comparison_calls =
               List.map
