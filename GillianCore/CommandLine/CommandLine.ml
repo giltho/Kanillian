@@ -448,12 +448,12 @@ struct
         entry_point
         () =
       let () = Config.current_exec_mode := Symbolic in
-      let () = PC.initialize Symbolic in
       let () = Printexc.record_backtrace @@ L.Mode.enabled () in
       let () = Config.stats := stats in
       let () = Config.parallel := parallel in
       let () = Config.no_heap := no_heap in
       let () = Config.entry_point := entry_point in
+      let () = PC.initialize Symbolic in
       let () = process_files files already_compiled outfile_opt incremental in
       let () = if stats then Statistics.print_statistics () in
       let () = Logging.wrap_up () in
@@ -571,12 +571,12 @@ struct
       let () = Config.stats := stats in
       let () = Config.lemma_proof := not no_lemma_proof in
       let () = Config.current_exec_mode := Verification in
-      let () = PC.initialize Verification in
       let () = Config.manual_proof := manual in
       let () = Config.Verification.exact := exact in
       let () = if exact then Fmt.pr "Exact verification enabled.\n" in
       let () = Config.Verification.set_procs_to_verify procs_to_verify in
       let () = Config.Verification.set_lemmas_to_verify lemmas_to_verify in
+      let () = PC.initialize Verification in
       let () =
         process_files files already_compiled outfile_opt no_unfold incremental
       in
@@ -677,13 +677,13 @@ struct
         bi_no_spec_depth
         () =
       let () = Config.current_exec_mode := BiAbduction in
-      let () = PC.initialize BiAbduction in
       let () = Config.stats := stats in
       let () = Config.no_heap := no_heap in
       let () = Config.parallel := parallel in
       let () = Config.bi_unroll_depth := bi_unroll_depth in
       let () = Config.bi_no_spec_depth := bi_no_spec_depth in
       let () = Config.specs_to_stdout := specs_to_stdout in
+      let () = PC.initialize BiAbduction in
       let () =
         process_files files already_compiled outfile_opt emit_specs incremental
       in
@@ -723,8 +723,8 @@ struct
       in
       let run test_suite_path npaf incremental () =
         let () = Config.current_exec_mode := exec_mode in
-        let () = PC.initialize exec_mode in
         let () = Config.bulk_print_all_failures := not npaf in
+        let () = PC.initialize exec_mode in
         let () = Logging.Mode.set_mode Disabled in
         let () = Printexc.record_backtrace false in
         Runner.run_all runner ~test_suite_path ~incremental
