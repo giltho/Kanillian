@@ -215,6 +215,7 @@ module Stmt : sig
       }
     | Skip
     | Expression of Expr.t
+    | Output of { msg : Expr.t; value : Expr.t }
     | Return of Expr.t option
 
   and switch_case = { case : Expr.t; sw_body : t }

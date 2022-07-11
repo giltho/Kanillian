@@ -31,7 +31,9 @@ open Irep.Infix
     and used both here and in [Expr]
     For example, here, there are no check that it's of the right type *)
 let size_of_irep irep =
-  irep $ Value |> Irep.as_just_bitpattern ~signed:false ~width:32 |> Z.to_int
+  try
+    irep $ Value |> Irep.as_just_bitpattern ~signed:false ~width:32 |> Z.to_int
+  with Not_found -> Gerror.unexpected ~irep "No size!"
 
 let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let of_irep = of_irep ~machine in

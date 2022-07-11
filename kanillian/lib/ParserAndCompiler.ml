@@ -1,7 +1,11 @@
 open Gillian
 module CP = Cgil_lib.ParserAndCompiler
 
-let initialize _ = CP.init_compcert ()
+let initialize _ =
+  let open Kanillian_compiler in
+  CP.init_compcert ();
+  Utils.Config.entry_point := Kconstants.CBMC_names.start;
+  at_exit (fun () -> Option.iter Helpers.Stats.report !Kconfig.kstats_file)
 
 let env_var_import_path =
   Some Kanillian_compiler.Kconstants.Imports.env_path_var
@@ -11,19 +15,34 @@ let other_imports = []
 type tl_ast = Program.t
 
 module TargetLangOptions = struct
-  type t = { main_only : bool }
+  type t = { main_only : bool; kstats_file : string option }
 
   let term =
     let open Cmdliner in
     let docs = Manpage.s_common_options in
-    let doc = "Hack - compile only the main function" in
+    let doc =
+      "Compile only the main function and its dependencies. It's a hack, use \
+       only for testing things."
+    in
     let main_only =
       Arg.(value & flag & info [ "only-main"; "main-only" ] ~docs ~doc)
     in
-    let opt main_only = { main_only } in
-    Term.(const opt $ main_only)
+    let doc =
+      "If set, write out a file containing the statistics about the \
+       compilation process."
+    in
+    let kstats_file =
+      Arg.(
+        value
+        & opt (some string) None
+        & info [ "kstats-file"; "kstats" ] ~docs ~doc)
+    in
+    let opt main_only kstats_file = { main_only; kstats_file } in
+    Term.(const opt $ main_only $ kstats_file)
 
-  let apply { main_only } = Kconfig.main_only := main_only
+  let apply { main_only; kstats_file } =
+    Kconfig.main_only := main_only;
+    Kconfig.kstats_file := kstats_file
 end
 
 type err = string

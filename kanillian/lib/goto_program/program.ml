@@ -5,9 +5,10 @@ let should_be_filtered = function
   | "__CPROVER_thread_keys"
   | "__CPROVER_memory"
   | "__CPROVER_threads_exited" -> true
-  (* The following names usually contain unhandled irep.
-     In any case we don't use them yet. *)
-  | "__CPROVER_initialize" | "__CPROVER__start" -> true
+  (* We hijack the __CPROVER_initialize function to do our own initialization.
+     Plus, it initializes the symbols above that contain arrays of size infinity and
+     that is not working well. *)
+  | "__CPROVER_initialize" -> true
   | _ -> false
 
 module Global_var = struct

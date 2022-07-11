@@ -193,6 +193,9 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       in
       let end_ = [ b ~label:end_lab Skip ] in
       control_s @ compiled_cases @ default_block @ end_
+  | Output _ ->
+      let () = Helpers.Stats.Unhandled.signal OutputStmt in
+      [ b Skip ]
 
 let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
   let b =
@@ -308,7 +311,7 @@ let set_global_env_proc (ctx : Ctx.t) =
   let body = Array.of_seq body in
   Proc.
     {
-      proc_name = Cgil_lib.CConstants.Internal_Functions.initialize_genv;
+      proc_name = Kconstants.CBMC_names.initialize;
       proc_source_path = None;
       proc_internal = true;
       proc_body = body;
@@ -359,18 +362,16 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
-  let init_call =
-    if func.symbol = "main" then
-      let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
-      [
-        Body_item.make
-          (Cmd.Call (Ctx.fresh_v ctx, Lit (String init_f), [], None, None));
-      ]
-    else []
-  in
-  let proc_body =
-    Array.of_list (init_call @ compile_statement ~ctx body @ free_locals)
-  in
+  (* let init_call =
+       if func.symbol = "__CPROVER__start" then
+         let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
+         [
+           Body_item.make
+             (Cmd.Call (Ctx.fresh_v ctx, Lit (String init_f), [], None, None));
+         ]
+       else []
+     in *)
+  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals) in
   Proc.
     {
       proc_name = func.symbol;

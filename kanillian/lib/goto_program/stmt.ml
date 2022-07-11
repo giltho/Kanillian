@@ -10,6 +10,7 @@ type body =
   | Switch of { control : Expr.t; cases : switch_case list; default : t option }
   | Skip
   | Expression of Expr.t
+  | Output of { msg : Expr.t; value : Expr.t }
   | Return of Expr.t option
 
 and switch_case = { case : Expr.t; sw_body : t }
@@ -47,6 +48,8 @@ let rec pp ft (t : t) =
   | Expression e -> pf ft "@[<v 3>{ %a };@]" Expr.pp e
   | Return e -> pf ft "@[<v 3>return %a;@]" (option Expr.pp) e
   | Goto label -> pf ft "@[<v 3>goto %s;@]" label
+  | Output { msg; value } ->
+      pf ft "@[<v 3>output (%a, %a);@]" Expr.pp msg Expr.pp value
   | Switch _ -> pf ft "switch"
 
 (** Lifting from Irep *)
@@ -122,6 +125,11 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       let func = expr_of_irep func in
       let args = List.map expr_of_irep args.sub in
       FunctionCall { lhs; func; args }
+  | Output ->
+      let msg, value = exactly_two ~msg:"Output stmt" irep in
+      let msg = expr_of_irep msg in
+      let value = expr_of_irep value in
+      Output { msg; value }
   | id -> Gerror.unhandled ~irep ("statement " ^ Id.to_string id)
 
 and switch_cases_of_irep ~machine l =

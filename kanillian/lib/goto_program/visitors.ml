@@ -106,6 +106,9 @@ class ['a] iter =
               self#visit_stmt ~ctx sw_body)
             cases;
           Option.iter (self#visit_stmt ~ctx) default
+      | Output { msg; value } ->
+          self#visit_expr ~ctx msg;
+          self#visit_expr ~ctx value
       | Goto _ | Skip -> ()
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =
@@ -354,6 +357,11 @@ class ['a] map =
                 cases = new_cases;
                 default = new_default;
               }
+      | Output { msg; value } ->
+          let new_msg = self#visit_expr ~ctx msg in
+          let new_value = self#visit_expr ~ctx value in
+          if new_msg == msg && new_value == value then body
+          else Output { msg = new_msg; value = new_value }
       | Goto _ | Skip -> body
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =

@@ -7,9 +7,18 @@ module Stats = struct
       | DeclCompositValue
       | ByteExtract
       | StructConstant
+      | OutputStmt
     [@@deriving show { with_path = false }]
 
     let stats : (feature, int) Hashtbl.t = Hashtbl.create 1
+
+    let json_stats () =
+      let assoc =
+        Hashtbl.to_seq stats
+        |> Seq.map (fun (feature, count) -> (show_feature feature, `Int count))
+        |> List.of_seq
+      in
+      `Assoc assoc
 
     let signal (feature : feature) =
       let current_count =
@@ -17,6 +26,11 @@ module Stats = struct
       in
       Hashtbl.replace stats feature (current_count + 1)
   end
+
+  let report file =
+    let unhandled = Unhandled.json_stats () in
+    let json = `Assoc [ ("unhandled", unhandled) ] in
+    Yojson.Safe.to_file file json
 end
 
 module Gcu = struct

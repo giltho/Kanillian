@@ -1,3 +1,8 @@
+module CBMC_names = struct
+  let initialize = "__CPROVER_initialize"
+  let start = "__CPROVER__start"
+end
+
 module Comp_functions = struct
   let cmpl_le = "i__cbmc_binop_cmpl_le"
   let cmpl_ge = "i__cbmc_binop_cmpl_ge"
