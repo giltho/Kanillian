@@ -70,9 +70,10 @@ type t = {
   locals : (string, Local.t) Hashtbl.t;
   allocated_temps : Local.t Hashset.t;
   fresh_lab : unit -> string;
+  harness : string option;
 }
 
-let make ~machine ~prog () =
+let make ~machine ~prog ~harness () =
   {
     allocated_temps = Hashset.empty ~size:32 ();
     locals = Hashtbl.create 0;
@@ -82,6 +83,7 @@ let make ~machine ~prog () =
     fresh_v = (fun () -> failwith "uninitialized var generator");
     fresh_lv = Generators.temp_lvar ();
     fresh_lab = Generators.label ();
+    harness;
   }
 
 let with_new_generators t = { t with fresh_v = Generators.temp_var () }

@@ -1,7 +1,5 @@
 include Utils
 
-exception Not_ok of string
-
 module J = struct
   open Yojson.Safe.Util
 

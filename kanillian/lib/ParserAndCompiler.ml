@@ -5,7 +5,11 @@ let initialize _ =
   let open Kanillian_compiler in
   CP.init_compcert ();
   Utils.Config.entry_point := Kconstants.CBMC_names.start;
-  at_exit (fun () -> Option.iter Helpers.Stats.report !Kconfig.kstats_file)
+  Option.iter
+    (fun kstats_file ->
+      Stats.init_from kstats_file;
+      at_exit (fun () -> Stats.report kstats_file))
+    !Kconfig.kstats_file
 
 let env_var_import_path =
   Some Kanillian_compiler.Kconstants.Imports.env_path_var
@@ -15,7 +19,11 @@ let other_imports = []
 type tl_ast = Program.t
 
 module TargetLangOptions = struct
-  type t = { main_only : bool; kstats_file : string option }
+  type t = {
+    main_only : bool;
+    kstats_file : string option;
+    harness : string option;
+  }
 
   let term =
     let open Cmdliner in
@@ -29,7 +37,8 @@ module TargetLangOptions = struct
     in
     let doc =
       "If set, write out a file containing the statistics about the \
-       compilation process."
+       compilation process. If the file already exists, it adds to stats to \
+       it, otherwise it creates it."
     in
     let kstats_file =
       Arg.(
@@ -37,12 +46,23 @@ module TargetLangOptions = struct
         & opt (some string) None
         & info [ "kstats-file"; "kstats" ] ~docs ~doc)
     in
-    let opt main_only kstats_file = { main_only; kstats_file } in
-    Term.(const opt $ main_only $ kstats_file)
+    let doc =
+      "Decides the entry point of the proof. Note that this is different from \
+       the --entry-point option."
+    in
+    let docv = "FUNCTION_NAME" in
+    let harness =
+      Arg.(value & opt (some string) None & info [ "harness" ] ~docs ~doc ~docv)
+    in
+    let opt main_only kstats_file harness =
+      { main_only; kstats_file; harness }
+    in
+    Term.(const opt $ main_only $ kstats_file $ harness)
 
-  let apply { main_only; kstats_file } =
+  let apply { main_only; kstats_file; harness } =
     Kconfig.main_only := main_only;
-    Kconfig.kstats_file := kstats_file
+    Kconfig.kstats_file := kstats_file;
+    Kconfig.harness := harness
 end
 
 type err = string
@@ -84,6 +104,9 @@ let parse_and_compile_files files =
   let+ goto_prog = parse_symtab_into_goto path in
   if !Kconfig.main_only then Main_only.filter_funs goto_prog;
   let goto_prog = Sanitize.sanitize_program goto_prog in
-  let context = Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog () in
+  let context =
+    Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog
+      ~harness:!Kconfig.harness ()
+  in
   let gil_prog = Compile.compile context in
   create_compilation_result path goto_prog gil_prog

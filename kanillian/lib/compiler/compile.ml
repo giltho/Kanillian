@@ -194,7 +194,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let end_ = [ b ~label:end_lab Skip ] in
       control_s @ compiled_cases @ default_block @ end_
   | Output _ ->
-      let () = Helpers.Stats.Unhandled.signal OutputStmt in
+      let () = Stats.Unhandled.signal OutputStmt in
       [ b Skip ]
 
 let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
@@ -362,15 +362,6 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
-  (* let init_call =
-       if func.symbol = "__CPROVER__start" then
-         let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
-         [
-           Body_item.make
-             (Cmd.Call (Ctx.fresh_v ctx, Lit (String init_f), [], None, None));
-         ]
-       else []
-     in *)
   let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals) in
   Proc.
     {
@@ -382,6 +373,29 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
       proc_spec;
     }
 
+let start_for_harness harness =
+  let init_call =
+    let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
+    Body_item.make (Cmd.Call ("u", Lit (String init_f), [], None, None))
+  in
+  let harness = Sanitize.sanitize_symbol harness in
+  let harness_call =
+    Body_item.make
+      (Cmd.Call
+         (Utils.Names.return_variable, Lit (String harness), [], None, None))
+  in
+  let return = Body_item.make Cmd.ReturnNormal in
+  let body = [| init_call; harness_call; return |] in
+  Proc.
+    {
+      proc_name = Kconstants.CBMC_names.start;
+      proc_source_path = None;
+      proc_internal = true;
+      proc_body = body;
+      proc_params = [];
+      proc_spec = None;
+    }
+
 let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   let program = context.prog in
   let gil_prog = Prog.create () in
@@ -390,8 +404,14 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
       (fun _ f prog -> Prog.add_proc prog (compile_function ~ctx:context f))
       program gil_prog
   in
-
   let gil_prog = Prog.add_proc gil_prog (set_global_env_proc context) in
+  let gil_prog =
+    Option.fold ~none:gil_prog
+      ~some:(fun harness ->
+        let gil_prog = Prog.add_proc gil_prog (start_for_harness harness) in
+        gil_prog)
+      context.harness
+  in
   assert (Machine_model.equal context.machine Machine_model.archi64);
   let imports =
     Kconstants.Imports.imports
