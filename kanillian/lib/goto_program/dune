@@ -4,6 +4,3 @@
  (flags :standard -open Irep_lib)
  (preprocess
   (pps ppx_deriving.std)))
-
-(cinaps
- (files machine_model.ml))
