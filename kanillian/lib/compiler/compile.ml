@@ -52,9 +52,8 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         | Some (f, _) -> f
       in
       pre @ [ b (Logic (Assume f)) ]
-  | Assert { property_class = Some "coverage_check"; _ } ->
-      (* We can't output nothing, as a label might have to get attached *)
-      [ b Skip ]
+  (* We can't output nothing, as a label might have to get attached *)
+  | Assert { property_class = Some "cover"; _ } -> [ b Skip ]
   | Assert { cond; property_class = _ } ->
       let e, pre = compile_expr cond in
       let e = Val_repr.as_value ~msg:"Assert operand" e in
@@ -375,7 +374,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
 
 let start_for_harness harness =
   let init_call =
-    let init_f = Cgil_lib.CConstants.Internal_Functions.initialize_genv in
+    let init_f = Kconstants.CBMC_names.initialize in
     Body_item.make (Cmd.Call ("u", Lit (String init_f), [], None, None))
   in
   let harness = Sanitize.sanitize_symbol harness in
