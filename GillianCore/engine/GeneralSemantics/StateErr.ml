@@ -1,4 +1,4 @@
-type ('mem_err, 'value) err_t =
+type ('mem_err, 'value) t =
   | EMem of 'mem_err  (** Memory error, depends on instantiation *)
   | EType of 'value * Type.t option * Type.t
       (** Incorrect type, depends on value *)
@@ -8,7 +8,7 @@ type ('mem_err, 'value) err_t =
 [@@deriving yojson]
 
 let get_recovery_vals
-    (errs : ('a, 'b) err_t list)
+    (errs : ('a, 'b) t list)
     (mem_recovery_vals : 'a -> 'b list) : 'b list =
   let f err =
     match err with
@@ -22,7 +22,7 @@ let pp_err
     (pp_m_err : Format.formatter -> 'a -> unit)
     (pp_v : Format.formatter -> 'b -> unit)
     (fmt : Format.formatter)
-    (err : ('a, 'b) err_t) : unit =
+    (err : ('a, 'b) t) : unit =
   match err with
   | EMem m_err -> pp_m_err fmt m_err
   | EType (v, t1, t2) ->
@@ -41,7 +41,7 @@ let pp_err
         (Fmt.list ~sep:(Fmt.any ", ") pp_asrts)
         asrtss
 
-let can_fix (errs : ('a, 'b) err_t list) : bool =
+let can_fix (errs : ('a, 'b) t list) : bool =
   let result =
     List.exists
       (fun e ->
@@ -59,7 +59,7 @@ let can_fix (errs : ('a, 'b) err_t list) : bool =
   Logging.verbose (fun fmt -> fmt "Can fix: overall %b" result);
   result
 
-let get_failing_constraint (err : ('a, 'b) err_t) (mem_fc : 'a -> Formula.t) :
+let get_failing_constraint (err : ('a, 'b) t) (mem_fc : 'a -> Formula.t) :
     Formula.t =
   match err with
   | EMem m_err -> mem_fc m_err

@@ -8,6 +8,7 @@ let results_dir, set_result_dir =
   ((fun () -> !rd), fun r -> rd := r)
 
 let entry_point = ref "main"
+let json_ui = ref false
 let ci = ref false
 let current_exec_mode : ExecMode.t ref = ref ExecMode.Verification
 let previously_normalised = ref false

@@ -20,7 +20,7 @@ module Make
   type t = CMemory.t * CStore.t * vt list
   type fix_t
   type m_err_t = CMemory.err_t
-  type err_t = (m_err_t, vt) StateErr.err_t
+  type err_t = (m_err_t, vt) StateErr.t
   type variants_t = (string, Expr.t option) Hashtbl.t [@@deriving yojson]
 
   exception Internal_State_Error of err_t list * t

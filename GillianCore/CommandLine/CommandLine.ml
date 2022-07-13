@@ -47,6 +47,10 @@ struct
     Arg.(
       value & opt string default & info [ "start"; "entry-point" ] ~docv ~doc)
 
+  let json_ui =
+    let doc = "Output some of the UI in JSON." in
+    Arg.(value & flag & info [ "json-ui" ] ~doc)
+
   let files =
     let doc = "Input file." in
     let docv = "FILE" in
@@ -356,10 +360,24 @@ struct
       let open ResultsDir in
       let open ChangeTracker in
       let run_main prog =
-        ignore
-          (SInterpreter.evaluate_proc
-             (fun x -> x)
-             prog !Config.entry_point [] (SState.init ()))
+        let results =
+          SInterpreter.evaluate_proc
+            (fun x -> x)
+            prog !Config.entry_point [] (SState.init ())
+        in
+        if !Config.json_ui then (
+          Fmt.pr "===JSON RESULTS===\n@?";
+          let state_to_yojson _ = `Null in
+          let state_err_to_yojson =
+            StateErr.to_yojson state_to_yojson Expr.to_yojson
+          in
+          let json_results =
+            List.map
+              (Engine.ExecRes.to_yojson state_to_yojson Expr.to_yojson
+                 (ExecErr.to_yojson Expr.to_yojson state_err_to_yojson))
+              results
+          in
+          Fmt.pr "%a" (Yojson.Safe.pretty_print ~std:true) (`List json_results))
       in
       if incremental && prev_results_exist () then
         (* Only re-run program if transitive callees of main proc have changed *)
@@ -440,7 +458,9 @@ struct
         stats
         incremental
         entry_point
+        json_ui
         () =
+      let () = Config.json_ui := json_ui in
       let () = Config.current_exec_mode := Symbolic in
       let () = Printexc.record_backtrace @@ L.Mode.enabled () in
       let () = Config.stats := stats in
@@ -455,7 +475,7 @@ struct
     let wpst_t =
       Term.(
         const wpst $ files $ already_compiled $ output_gil $ no_heap $ stats
-        $ incremental $ entry_point)
+        $ incremental $ entry_point $ json_ui)
 
     let wpst_info =
       let doc = "Symbolically executes a file of the target language" in

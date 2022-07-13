@@ -501,7 +501,7 @@ struct
    fun e ->
     try State.eval_expr state e
     with State.Internal_State_Error (errs, s) ->
-      raise (Interpreter_error (List.map (fun x -> ExecErr.ESt x) errs, s))
+      raise (Interpreter_error (List.map (fun x -> ExecErr.EState x) errs, s))
 
   let check_loop_ids actual expected =
     match actual = expected with
@@ -608,7 +608,7 @@ struct
             if not (ExecMode.biabduction_exec !Config.current_exec_mode) then
               Printf.printf "%s" msg;
             L.normal (fun m -> m "%s" msg);
-            raise (Interpreter_error ([ ESt err ], state)))
+            raise (Interpreter_error ([ EState err ], state)))
     | Macro (name, args) -> (
         let macro = Macro.get prog.prog.macros name in
         match macro with
@@ -1444,7 +1444,7 @@ struct
                   callstack = cs;
                   proc_idx = i;
                   error_state;
-                  errors = List.map (fun x -> ExecErr.ESt x) errs;
+                  errors = List.map (fun x -> ExecErr.EState x) errs;
                   branch_path = List_utils.cons_opt branch_case branch_path;
                 };
             ])

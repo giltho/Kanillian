@@ -39,7 +39,7 @@ module Make (SMemory : SMemory.S) :
     | FSVars of SS.t
     | FAsrt of Asrt.t
 
-  type err_t = (m_err_t, vt) StateErr.err_t [@@deriving yojson]
+  type err_t = (m_err_t, vt) StateErr.t [@@deriving yojson]
   type action_ret = ASucc of (t * vt list) list | AFail of err_t list
   type u_res = UWTF | USucc of t | UFail of err_t list
 

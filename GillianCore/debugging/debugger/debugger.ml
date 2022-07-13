@@ -1375,7 +1375,7 @@ struct
       { id = Fmt.to_to_string Logging.pp_err error; description = None }
     in
     match error with
-    | ExecErr.ESt state_error -> (
+    | ExecErr.EState state_error -> (
         match state_error with
         | StateErr.EMem merr ->
             Lifter.memory_error_to_exception_info
