@@ -129,11 +129,6 @@ struct
     in
     Arg.(value & flag & info [ "stats" ] ~doc)
 
-  let parallel =
-    let docv = "PARALLEL" in
-    let doc = "Enable parallel execution, default is false" in
-    Arg.(value & flag & info [ "p"; "parallel" ] ~doc ~docv)
-
   let no_print_failures =
     let doc =
       "Do not print the list of all the failed tests at the end of the bulk \
@@ -443,31 +438,24 @@ struct
         outfile_opt
         no_heap
         stats
-        parallel
         incremental
         entry_point
         () =
       let () = Config.current_exec_mode := Symbolic in
       let () = Printexc.record_backtrace @@ L.Mode.enabled () in
       let () = Config.stats := stats in
-      let () = Config.parallel := parallel in
       let () = Config.no_heap := no_heap in
       let () = Config.entry_point := entry_point in
       let () = PC.initialize Symbolic in
       let () = process_files files already_compiled outfile_opt incremental in
       let () = if stats then Statistics.print_statistics () in
-      let () = Logging.wrap_up () in
-      try
-        while true do
-          let _ = Unix.wait () in
-          ()
-        done
-      with Unix.Unix_error (Unix.ECHILD, "wait", _) -> ()
+      (* TODO: wrap-up should be done using [Stdlib.onexit] instead *)
+      Logging.wrap_up ()
 
     let wpst_t =
       Term.(
         const wpst $ files $ already_compiled $ output_gil $ no_heap $ stats
-        $ parallel $ incremental $ entry_point)
+        $ incremental $ entry_point)
 
     let wpst_info =
       let doc = "Symbolically executes a file of the target language" in
@@ -669,7 +657,6 @@ struct
         outfile_opt
         no_heap
         stats
-        parallel
         emit_specs
         specs_to_stdout
         incremental
@@ -679,7 +666,6 @@ struct
       let () = Config.current_exec_mode := BiAbduction in
       let () = Config.stats := stats in
       let () = Config.no_heap := no_heap in
-      let () = Config.parallel := parallel in
       let () = Config.bi_unroll_depth := bi_unroll_depth in
       let () = Config.bi_no_spec_depth := bi_no_spec_depth in
       let () = Config.specs_to_stdout := specs_to_stdout in
@@ -693,8 +679,8 @@ struct
     let act_t =
       Term.(
         const act $ files $ already_compiled $ output_gil $ no_heap $ stats
-        $ parallel $ emit_specs $ specs_to_stdout $ incremental
-        $ bi_unroll_depth $ bi_no_spec_depth)
+        $ emit_specs $ specs_to_stdout $ incremental $ bi_unroll_depth
+        $ bi_no_spec_depth)
 
     let act_info =
       let doc =

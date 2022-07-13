@@ -44,10 +44,6 @@ let manual_proof = ref false
 (* let perform_syntax_checks = ref false *)
 let lemma_proof = ref false
 
-(** {2 Parallel threading} *)
-
-let parallel = ref false
-
 (** {2 Limited printing} *)
 
 let pbn = ref false
