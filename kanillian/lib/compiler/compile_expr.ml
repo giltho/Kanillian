@@ -13,6 +13,12 @@ type access =
   | ZST
 [@@deriving show { with_path = false }]
 
+let dummy_access ~ctx type_ =
+  if Ctx.is_zst_access ctx type_ then ZST
+  else if Ctx.representable_in_store ctx type_ then
+    InMemoryScalar { ptr = Lit Nono; loaded = None }
+  else InMemoryComposit { ptr = Lit Nono; type_ }
+
 (* This file is a mess of mutually-recursive functions *)
 
 let compile_binop
@@ -37,42 +43,42 @@ let compile_binop
         | CInteger I_bool -> `Proc cmpu_eq
         | CInteger I_size_t -> `Proc cmplu_eq
         | CInteger I_ssize_t -> `Proc cmpl_eq
-        | _ -> Error.unhandled (Fmt.str "binop == for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Notequal -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_ne
         | CInteger I_bool -> `Proc cmpu_ne
         | CInteger I_size_t -> `Proc cmplu_ne
         | CInteger I_ssize_t -> `Proc cmpl_ne
-        | _ -> Error.unhandled (Fmt.str "binop != for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Le -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_le
         | CInteger I_bool -> `Proc cmpu_le
         | CInteger I_size_t -> `Proc cmplu_le
         | CInteger I_ssize_t -> `Proc cmpl_le
-        | _ -> Error.unhandled (Fmt.str "binop <= for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Lt -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_lt
         | CInteger I_bool -> `Proc cmpu_lt
         | CInteger I_size_t -> `Proc cmplu_lt
         | CInteger I_ssize_t -> `Proc cmpl_lt
-        | _ -> Error.unhandled (Fmt.str "binop < for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Gt -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_gt
         | CInteger I_bool -> `Proc cmpu_gt
         | CInteger I_size_t -> `Proc cmplu_gt
         | CInteger I_ssize_t -> `Proc cmpl_gt
-        | _ -> Error.unhandled (Fmt.str "binop > for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Ge -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_ge
         | CInteger I_bool -> `Proc cmpu_ge
         | CInteger I_size_t -> `Proc cmplu_ge
         | CInteger I_ssize_t -> `Proc cmpl_ge
-        | _ -> Error.unhandled (Fmt.str "binop >= for type %a" GType.pp lty))
+        | _ -> `Unhandled true)
     | Plus -> (
         match (lty, rty) with
         | CInteger I_int, CInteger I_int -> `Proc add
@@ -84,8 +90,8 @@ let compile_binop
         | CInteger (I_size_t | I_ssize_t), Pointer _ ->
             `App (fun num ptr -> Memory.ptr_add_v ptr num)
         | Pointer _, CInteger (I_size_t | I_ssize_t) -> `App Memory.ptr_add_v
-        | _ -> Error.unhandled (Fmt.str "binop + for type %a" GType.pp lty))
-    | _ -> Error.unhandled (Fmt.str "binary operator: %a" Ops.Binary.pp binop)
+        | _ -> `Unhandled true)
+    | _ -> `Unhandled false
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
@@ -97,6 +103,12 @@ let compile_binop
       in
       Cs.return ~app:[ call ] (Expr.PVar gvar)
   | `App f -> Cs.return (f e1 e2)
+  | `Unhandled with_type ->
+      let type_info = if with_type then Some (lty, rty) else None in
+      let cmd =
+        Helpers.assert_unhandled ~feature:(BinOp (binop, type_info)) []
+      in
+      Cs.return ~app:[ cmd ] (Expr.Lit Nono)
 
 let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
   let llvar = Expr.LVar lvar in
@@ -107,8 +119,9 @@ let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
       let open Cgil_lib.CConstants.VTypes in
       let str_constr =
         match ty with
-        | I_int -> int_type
-        | _ -> Error.unhandled ("nondet for int type: " ^ IntType.show ty)
+        | I_int | I_char | I_bool -> int_type
+        | I_size_t | I_ssize_t ->
+            if Ctx.archi ctx == `Archi64 then long_type else int_type
       in
       let value = Ctx.fresh_lv ctx in
       let e_value = Expr.LVar value in
@@ -218,10 +231,7 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
       -> `Proc Kconstants.Cast_functions.unsign_int
     | Pointer _, Pointer _ -> `Nop
-    | _ ->
-        Error.unhandled
-          (Printf.sprintf "Cannot perform cast yet from %s into %s"
-             (GType.show from) (GType.show into))
+    | _ -> `Unhandled
   in
   match cast_with with
   | `Proc function_name ->
@@ -231,6 +241,9 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
       let call = Cmd.Call (temp, function_name, [ e ], None, None) in
       Cs.return ~app:[ call ] (Val_repr.ByValue (PVar temp))
   | `Nop -> Cs.return e
+  | `Unhandled ->
+      let cmd = Helpers.assert_unhandled ~feature:(Cast (from, into)) [] in
+      Cs.return ~app:[ cmd ] (Val_repr.dummy ~ctx into)
 
 let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
   if Ctx.is_zst_access ctx lvalue.type_ then Cs.return ZST
@@ -284,12 +297,9 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
             Error.unexpected
               "Dereferencing a composit value, pointers should be passed by \
                value")
-    (* Not sure about those 2 actually.
-       The parameter in there, is it a pointer? *)
     | Index _ ->
-        (* Oh no! this is trivial to implement, but I have to
-           call compile_expr, that's circular dependencies... *)
-        Error.unhandled "array index lvalue"
+        let cmd = b (Helpers.assert_unhandled ~feature:ArrayIndex []) in
+        Cs.return ~app:[ cmd ] (dummy_access ~ctx lvalue.type_)
     | Member { lhs; field } ->
         let* lhs_access = as_access lhs in
         let ptr, lhs_ty =
@@ -515,28 +525,25 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
   | PointerConstant b ->
       let i = Gcu.Camlcoq.Z.of_sint b in
       let v =
-        match ctx.machine.pointer_width with
-        | 32 -> Gcu.Values.Vint i
-        | 64 -> Gcu.Values.Vlong i
-        | _ -> Error.unhandled "PointerConstant - unknown archi"
+        match Ctx.archi ctx with
+        | `Archi32 -> Gcu.Values.Vint i
+        | `Archi64 -> Gcu.Values.Vlong i
       in
       let lit = Gcu.Vt.gil_of_compcert v in
       by_value (Lit lit)
   | IntConstant z ->
-      let int_ty = Goto_lib.Type.as_int_type expr.type_ in
       let cz = Gcu.Vt.z_of_int z in
       let ccert_value =
         let open Gcu.Values in
-        match int_ty with
-        | I_int | I_char -> Vint cz
-        | I_size_t | I_ssize_t -> (
-            match ctx.machine.pointer_width with
-            | 32 -> Vint cz
-            | 64 -> Vlong cz
-            | _ ->
-                Error.unhandled
-                  "Gillian only handles archi 32 and archi 64 for now")
-        | I_bool -> Error.unexpected "IntConstant with type I_bool"
+        match expr.type_ with
+        | CInteger (I_int | I_char | I_bool) -> Vint cz
+        | CInteger (I_size_t | I_ssize_t) -> (
+            match Ctx.archi ctx with
+            | `Archi32 -> Vint cz
+            | `Archi64 -> Vlong cz)
+        | Unsignedbv { width } | Signedbv { width } ->
+            if width <= 32 then Vint cz else Vlong cz
+        | _ -> Error.unexpected "IntConstant with non-int type"
       in
       let lit = Gcu.Vt.gil_of_compcert ccert_value in
       by_value (Lit lit)
@@ -552,7 +559,9 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       let e = Val_repr.as_value ~msg:"Unary operand" e in
       match op with
       | Not -> by_value (Expr.Infix.not e)
-      | _ -> Error.unhandled ("Unary operator: " ^ Ops.Unary.show op))
+      | op ->
+          let cmd = b (Helpers.assert_unhandled ~feature:(UnOp op) []) in
+          Cs.return ~app:[ cmd ] (Val_repr.ByValue (Lit Nono)))
   | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
   | TypeCast to_cast ->
       let* to_cast_e = compile_expr to_cast in
@@ -568,4 +577,9 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
   | Struct _ ->
       let cmd = assert_unhandled ~feature:StructConstant [] in
       by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
-  | _ -> Error.unhandled ("Cannot compile expr yet: " ^ GExpr.show expr)
+  | Array _ ->
+      let cmd = assert_unhandled ~feature:ArrayConstant [] in
+      by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
+  | StringConstant _ ->
+      let cmd = assert_unhandled ~feature:StringConstant [] in
+      by_copy ~app:[ b cmd ] (Lit Nono) expr.type_

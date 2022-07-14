@@ -53,7 +53,7 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
          else
            let () =
              if sym.is_weak || sym.is_volatile then
-               Gerror.unhandled "weak or volatile value"
+               Gerror.unhandled WeakOrVolatile
            in
            let location = Location.of_irep sym.location in
            let type_ = Type.of_irep ~machine sym.type_ in

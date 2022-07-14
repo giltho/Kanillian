@@ -38,7 +38,6 @@ let size_of_irep irep =
 let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let of_irep = of_irep ~machine in
   let datatype_component_of_irep = datatype_component_of_irep ~machine in
-  (* let unhandled = Gerror.unhandled ~irep in *)
   let unexpected = Gerror.unexpected ~irep in
   let ( $ ) irep name =
     match irep $? name with
@@ -134,10 +133,6 @@ and datatype_component_of_irep ~machine irep : Datatype_component.t =
     Field { name; type_ }
 
 let type_in_irep ~machine irep = of_irep ~machine (irep $ Type)
-
-let as_int_type = function
-  | CInteger ty -> ty
-  | _ -> failwith "Not an integer type"
 
 (** Returns the size of a type in bits *)
 let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =

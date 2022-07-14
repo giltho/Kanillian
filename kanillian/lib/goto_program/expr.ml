@@ -89,8 +89,7 @@ and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
   | Assign ->
       let lhs, rhs = exactly_two irep in
       Assign { lhs = of_irep lhs; rhs = of_irep rhs }
-  | id ->
-      Gerror.unhandled ~irep ("unknown side-effecting irep: " ^ Id.to_string id)
+  | id -> Gerror.unhandled ~irep (SideEffect id)
 
 and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
     =
@@ -152,8 +151,8 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
       | Pointer _ -> (
           match (irep $ Value).id with
           | NULL -> PointerConstant 0
-          | _ -> unhandled "Pointer constant that is not NULL")
-      | _ -> unhandled "Cannot handle this constant of this type yet")
+          | _ -> unhandled PointerConstantNotNull)
+      | ty -> unhandled (ConstantWithType (Type.show ty)))
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->
       byte_extract_of_irep ~machine irep
@@ -225,7 +224,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Popcount -> lift_unop Popcount
   | UnaryMinus -> lift_unop UnaryMinus
   (* Catch-all *)
-  | id -> unhandled ("unhandled expr value: " ^ Id.to_string id)
+  | id -> unhandled (Expr id)
 
 and of_irep ~machine irep =
   let location = Location.sloc_in_irep irep in

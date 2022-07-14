@@ -46,6 +46,12 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   | Assume { cond } ->
       let e, pre = compile_expr cond in
       let e = Val_repr.as_value ~msg:"Assume operand" e in
+      (* FIXME: hack to avoid wrong compilation to be in the way.
+         Remove that later. *)
+      let e =
+        Expr.subst_expr_for_expr ~to_subst:(Expr.Lit Nono)
+          ~subst_with:(Expr.Lit (Bool true)) e
+      in
       let f =
         match Formula.lift_logic_expr e with
         | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
@@ -55,8 +61,13 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   (* We can't output nothing, as a label might have to get attached *)
   | Assert { property_class = Some "cover"; _ } -> [ b Skip ]
   | Assert { cond; property_class = _ } ->
+      Fmt.pr "%a\n@?" GExpr.pp cond;
       let e, pre = compile_expr cond in
       let e = Val_repr.as_value ~msg:"Assert operand" e in
+      let e =
+        Expr.subst_expr_for_expr ~to_subst:(Expr.Lit Nono)
+          ~subst_with:(Expr.Lit (Bool false)) e
+      in
       let f =
         match Formula.lift_logic_expr e with
         | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
@@ -141,7 +152,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
             | InMemoryScalar { ptr; _ }, ByValue v ->
                 [ b (Memory.store_scalar ~ctx ptr v lvalue.type_) ]
             | InMemoryComposit _, ByCopy _ ->
-                Error.unhandled "ByCopy function call destination"
+                [ b (Helpers.assert_unhandled ~feature:ReturnByCopy []) ]
             | _ ->
                 Error.code_error
                   (Fmt.str
@@ -260,16 +271,16 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
       | None -> []
       | Some e ->
           let v, v_init_cmds = compile_expr ~ctx e in
-          let v =
-            Val_repr.as_value ~error:Error.unhandled
-              ~msg:"global variable init value" v
+          let v, as_value_cmds =
+            Val_repr.as_value_or_unhandled ~feature:DeclCompositValue v
+            |> Cs.map_l b
           in
           let store_value =
             Memory.store_scalar ~ctx ~var:"u"
               (Expr.EList [ loc; Expr.zero_i ])
               v gv.type_
           in
-          v_init_cmds @ [ b store_value ]
+          v_init_cmds @ as_value_cmds @ [ b store_value ]
     in
     let drom_perm_cmd =
       let drom_perm = Cgil_lib.LActions.(str_ac (AMem DropPerm)) in

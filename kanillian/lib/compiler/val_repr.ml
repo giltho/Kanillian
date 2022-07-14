@@ -15,3 +15,7 @@ let as_value_or_unhandled ~feature e =
   | ByCopy _ ->
       let cmd = assert_unhandled ~feature [] in
       Cs.return ~app:[ cmd ] (Expr.Lit Nono)
+
+let dummy ~ctx type_ =
+  if Ctx.representable_in_store ctx type_ then ByValue (Expr.Lit Nono)
+  else ByCopy { ptr = Expr.Lit Nono; type_ }

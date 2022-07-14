@@ -6,9 +6,7 @@ let initialize _ =
   CP.init_compcert ();
   Utils.Config.entry_point := Kconstants.CBMC_names.start;
   Option.iter
-    (fun kstats_file ->
-      Stats.init_from kstats_file;
-      at_exit (fun () -> Stats.report kstats_file))
+    (fun kstats_file -> at_exit (fun () -> Stats.report kstats_file))
     !Kconfig.kstats_file
 
 let env_var_import_path =

@@ -121,3 +121,9 @@ let with_entering_body ctx stmt =
   let allocated_temps = Hashset.empty ~size:32 () in
   let fresh_v = Generators.temp_var () in
   { ctx with in_memory; locals; fresh_v; allocated_temps }
+
+let archi ctx =
+  match ctx.machine.Machine_model.pointer_width with
+  | 32 -> `Archi32
+  | 64 -> `Archi64
+  | _ -> Error.unexpected "Archi that is neither 64 nor 32"

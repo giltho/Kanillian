@@ -1,6 +1,16 @@
 module Gerror : sig
+  type unhandled_feature =
+    | PointerConstantNotNull
+    | SideEffect of Id.t
+    | ConstantWithType of string
+    | Expr of Id.t
+    | Statement of Id.t
+    | WeakOrVolatile
+
+  val unhandled_feature_to_string : unhandled_feature -> string
+
   exception Unexpected_irep of Irep.t option * string
-  exception Unhandled_irep of Irep.t option * string
+  exception Unhandled_irep of Irep.t option * unhandled_feature
   exception Code_error of Irep.t option * string
 end
 
@@ -163,7 +173,6 @@ and Type : sig
     machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> string -> int
 
   val is_function : t -> bool
-  val as_int_type : t -> IntType.t
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end
 

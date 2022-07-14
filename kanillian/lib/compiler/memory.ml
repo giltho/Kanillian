@@ -24,13 +24,13 @@ let chunk_to_string = function
 
 let int_chuck_for ~signed ~size =
   match size with
-  | 8 -> if signed then Int8signed else Int8unsigned
-  | 16 -> if signed then Int16signed else Int16unsigned
-  | 32 -> Int32
-  | 64 -> Int64
-  | _ -> Error.unhandled "int_chuck_for: unsupported size"
+  | 8 -> Some (if signed then Int8signed else Int8unsigned)
+  | 16 -> Some (if signed then Int16signed else Int16unsigned)
+  | 32 -> Some Int32
+  | 64 -> Some Int64
+  | _ -> None
 
-let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
+let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : chunk option =
   match t with
   | CInteger I_bool -> int_chuck_for ~signed:false ~size:ctx.machine.bool_width
   | CInteger I_char ->
@@ -44,8 +44,8 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) =
       int_chuck_for ~signed:true ~size:ctx.machine.pointer_width
   | Signedbv { width } -> int_chuck_for ~signed:true ~size:width
   | Unsignedbv { width } -> int_chuck_for ~signed:false ~size:width
-  | Float -> Float32
-  | Double -> Float64
+  | Float -> Some Float32
+  | Double -> Some Float64
   | Pointer _ -> int_chuck_for ~signed:false ~size:ctx.machine.pointer_width
   | _ ->
       Error.code_error
@@ -108,28 +108,36 @@ let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
     If a variable is given, the returned variable
     is always equal to it *)
 let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
-  let chunk = chunk_for_type ~ctx t in
-  let chunk = Expr.Lit (String (chunk_to_string chunk)) in
-  let var =
-    match var with
-    | Some var -> var
-    | None -> Ctx.fresh_v ctx
-  in
-  let loadv = Cgil_lib.CConstants.Internal_Functions.loadv in
-  let load_cmd = Cmd.Call (var, Lit (String loadv), [ chunk; e ], None, None) in
-  (var, [ load_cmd ])
+  match chunk_for_type ~ctx t with
+  | None ->
+      let cmd = Helpers.assert_unhandled ~feature:(LoadScalar t) [ e ] in
+      Cs.return ~app:[ cmd ] "UNREACHABLE"
+  | Some chunk ->
+      let chunk = Expr.Lit (String (chunk_to_string chunk)) in
+      let var =
+        match var with
+        | Some var -> var
+        | None -> Ctx.fresh_v ctx
+      in
+      let loadv = Cgil_lib.CConstants.Internal_Functions.loadv in
+      let load_cmd =
+        Cmd.Call (var, Lit (String loadv), [ chunk; e ], None, None)
+      in
+      (var, [ load_cmd ])
 
 let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
     string Cmd.t =
-  let chunk = chunk_for_type ~ctx t in
-  let chunk = Expr.Lit (String (chunk_to_string chunk)) in
-  let var =
-    match var with
-    | Some var -> var
-    | None -> Ctx.fresh_v ctx
-  in
-  let storev = Cgil_lib.CConstants.Internal_Functions.storev in
-  let store_cmd =
-    Cmd.Call (var, Lit (String storev), [ chunk; p; v ], None, None)
-  in
-  store_cmd
+  match chunk_for_type ~ctx t with
+  | None -> Helpers.assert_unhandled ~feature:(StoreScalar t) []
+  | Some chunk ->
+      let chunk = Expr.Lit (String (chunk_to_string chunk)) in
+      let var =
+        match var with
+        | Some var -> var
+        | None -> Ctx.fresh_v ctx
+      in
+      let storev = Cgil_lib.CConstants.Internal_Functions.storev in
+      let store_cmd =
+        Cmd.Call (var, Lit (String storev), [ chunk; p; v ], None, None)
+      in
+      store_cmd

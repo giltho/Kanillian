@@ -130,7 +130,7 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       let msg = expr_of_irep msg in
       let value = expr_of_irep value in
       Output { msg; value }
-  | id -> Gerror.unhandled ~irep ("statement " ^ Id.to_string id)
+  | id -> Gerror.unhandled ~irep (Statement id)
 
 and switch_cases_of_irep ~machine l =
   let is_default irep =
