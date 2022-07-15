@@ -18,6 +18,7 @@ type value =
   | StringConstant of string
   | TypeCast of t
   | Nondet
+  | Unhandled of Id.t * string
 
 and t = { value : value; type_ : Type.t; location : Location.t }
 [@@deriving show { with_path = false }]
@@ -51,11 +52,21 @@ let pp ft t =
     | BoolConstant b -> pf ft "%b" b
     | AddressOf e -> pf ft "&%a" pp e
     | Dereference e -> pf ft "*%a" pp e
+    | Unhandled (id, msg) -> (
+        match msg with
+        | "" -> pf ft "UNHANDLED_EXPR(%s)" (Id.to_string id)
+        | _ -> pf ft "UNHANDLED_EXPR(%s::%s)" (Id.to_string id) msg)
   in
 
   (Fmt.hbox pp) ft t
 
 let show = Fmt.to_to_string pp
+
+let unhandled ~irep:_ id msg =
+  (* TODO: hide the next line behind a config flag *)
+  (* Fmt.pr "UNHANDLED_IREP: %a\n@?"
+     Yojson.Safe.pretty_print (Irep.to_yojson irep); *)
+  Unhandled (id, msg)
 
 let as_symbol e =
   match e.value with
@@ -89,7 +100,7 @@ and side_effecting_of_irep ~(machine : Machine_model.t) (irep : Irep.t) =
   | Assign ->
       let lhs, rhs = exactly_two irep in
       Assign { lhs = of_irep lhs; rhs = of_irep rhs }
-  | id -> Gerror.unhandled ~irep (SideEffect id)
+  | id -> unhandled ~irep id "SideEffect"
 
 and lift_binop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Binary.t)
     =
@@ -110,7 +121,6 @@ and lift_unop ~(machine : Machine_model.t) (irep : Irep.t) (op : Ops.Unary.t) =
 and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
     =
   let unexpected = Gerror.unexpected ~irep in
-  let unhandled = Gerror.unhandled ~irep in
   let of_irep = of_irep ~machine in
   let lift_binop = lift_binop ~machine irep in
   let lift_unop = lift_unop ~machine irep in
@@ -151,8 +161,8 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
       | Pointer _ -> (
           match (irep $ Value).id with
           | NULL -> PointerConstant 0
-          | _ -> unhandled PointerConstantNotNull)
-      | ty -> unhandled (ConstantWithType (Type.show ty)))
+          | _ -> unhandled ~irep Constant "Non0PointerConstant")
+      | ty -> unhandled ~irep Constant ("WithType::" ^ Type.show ty))
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->
       byte_extract_of_irep ~machine irep
@@ -224,7 +234,7 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Popcount -> lift_unop Popcount
   | UnaryMinus -> lift_unop UnaryMinus
   (* Catch-all *)
-  | id -> unhandled (Expr id)
+  | id -> unhandled ~irep id ""
 
 and of_irep ~machine irep =
   let location = Location.sloc_in_irep irep in

@@ -30,6 +30,8 @@ module Unhandled = struct
     | LoadScalar of Type.t
     | StoreScalar of Type.t
     | Cast of Type.t * Type.t
+    | ExprIrep of Irep_lib.Id.t * string
+    | StmtIrep of Irep_lib.Id.t
 
   let feature_to_string = function
     | CompositNondet -> "CompositNondet"
@@ -52,6 +54,8 @@ module Unhandled = struct
     | LoadScalar t -> "LoadScalar::" ^ Type.show t
     | StoreScalar t -> "StoreScalar::" ^ Type.show t
     | Cast (from, to_) -> "Cast::" ^ Type.show from ^ "::" ^ Type.show to_
+    | ExprIrep (id, msg) -> "ExprIrep::" ^ Irep_lib.Id.to_string id ^ "::" ^ msg
+    | StmtIrep id -> "StmtIrep::" ^ Irep_lib.Id.to_string id
 
   let stats : (feature, int) Hashtbl.t = Hashtbl.create 1
 

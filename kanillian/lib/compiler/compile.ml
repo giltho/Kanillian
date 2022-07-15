@@ -11,7 +11,7 @@ module GType = Goto_lib.Type
              {
                array = { value = StringConstant str; _ };
                index = { value = IntConstant z; _ };
-             };
+             }
          _;
        } ->
        let idx = Z.to_int z in
@@ -203,6 +203,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       in
       let end_ = [ b ~label:end_lab Skip ] in
       control_s @ compiled_cases @ default_block @ end_
+  | Unhandled id -> [ b (assert_unhandled ~feature:(StmtIrep id) []) ]
   | Output _ ->
       let () = Stats.Unhandled.signal OutputStmt in
       [ b Skip ]

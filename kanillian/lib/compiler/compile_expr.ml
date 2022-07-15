@@ -496,6 +496,11 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
   let loc = Body_item.compile_location expr.location in
   let id = expr.location.origin_id in
   let b = Body_item.make ~loc ~id in
+  let unhandled feature =
+    let cmd = assert_unhandled ~feature [] in
+    let v = Val_repr.dummy ~ctx expr.type_ in
+    Cs.return ~app:[ b cmd ] v
+  in
   match expr.value with
   | Symbol _ | Dereference _ | Index _ | Member _ -> (
       if Ctx.is_zst_access ctx expr.type_ then by_value (Lit Null)
@@ -569,17 +574,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       |> Cs.map_l b
   | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
   | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
-  | ByteExtract _ ->
-      let cmd = assert_unhandled ~feature:ByteExtract [] in
-      if Ctx.representable_in_store ctx expr.type_ then
-        by_value ~app:[ b cmd ] (Lit Nono)
-      else by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
-  | Struct _ ->
-      let cmd = assert_unhandled ~feature:StructConstant [] in
-      by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
-  | Array _ ->
-      let cmd = assert_unhandled ~feature:ArrayConstant [] in
-      by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
-  | StringConstant _ ->
-      let cmd = assert_unhandled ~feature:StringConstant [] in
-      by_copy ~app:[ b cmd ] (Lit Nono) expr.type_
+  | ByteExtract _ -> unhandled ByteExtract
+  | Struct _ -> unhandled StructConstant
+  | Array _ -> unhandled ArrayConstant
+  | StringConstant _ -> unhandled StringConstant
+  | Unhandled (id, msg) -> unhandled (ExprIrep (id, msg))

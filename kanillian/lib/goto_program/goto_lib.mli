@@ -1,16 +1,5 @@
 module Gerror : sig
-  type unhandled_feature =
-    | PointerConstantNotNull
-    | SideEffect of Id.t
-    | ConstantWithType of string
-    | Expr of Id.t
-    | Statement of Id.t
-    | WeakOrVolatile
-
-  val unhandled_feature_to_string : unhandled_feature -> string
-
   exception Unexpected_irep of Irep.t option * string
-  exception Unhandled_irep of Irep.t option * unhandled_feature
   exception Code_error of Irep.t option * string
 end
 
@@ -197,6 +186,7 @@ module Expr : sig
     | StringConstant of string
     | TypeCast of t
     | Nondet
+    | Unhandled of Id.t * string
 
   and t = { value : value; type_ : Type.t; location : Location.t }
   [@@deriving show]
@@ -226,6 +216,7 @@ module Stmt : sig
     | Expression of Expr.t
     | Output of { msg : Expr.t; value : Expr.t }
     | Return of Expr.t option
+    | Unhandled of Id.t
 
   and switch_case = { case : Expr.t; sw_body : t }
   and t = { location : Location.t; body : body }

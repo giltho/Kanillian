@@ -2430,6 +2430,9 @@ let to_string str =
   | StatementListInstructions -> "statement_list_instructions"
   | FreeformString s -> s
 
+let show = to_string
+let pp = Fmt.of_to_string to_string
+
 let of_yojson = function
   | `String x -> of_string x
   | j -> Kutils.J.parse_error j "Id is not a string"

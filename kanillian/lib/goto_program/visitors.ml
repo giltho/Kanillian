@@ -75,7 +75,8 @@ class ['a] iter =
       | CBoolConstant _
       | BoolConstant _
       | PointerConstant _
-      | StringConstant _ -> ()
+      | StringConstant _
+      | Unhandled _ -> ()
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
       self#visit_location ~ctx e.location;
@@ -109,7 +110,7 @@ class ['a] iter =
       | Output { msg; value } ->
           self#visit_expr ~ctx msg;
           self#visit_expr ~ctx value
-      | Goto _ | Skip -> ()
+      | Goto _ | Skip | Unhandled _ -> ()
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =
       self#visit_location ~ctx stmt.location;
@@ -276,7 +277,8 @@ class ['a] map =
       | CBoolConstant _
       | BoolConstant _
       | PointerConstant _
-      | StringConstant _ -> ev
+      | StringConstant _
+      | Unhandled _ -> ev
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
       let new_value = self#visit_expr_value ~ctx ~type_:e.type_ e.value in
@@ -362,7 +364,7 @@ class ['a] map =
           let new_value = self#visit_expr ~ctx value in
           if new_msg == msg && new_value == value then body
           else Output { msg = new_msg; value = new_value }
-      | Goto _ | Skip -> body
+      | Goto _ | Skip | Unhandled _ -> body
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =
       let new_body = self#visit_stmt_body ~ctx stmt.body in

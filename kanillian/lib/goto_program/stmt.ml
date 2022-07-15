@@ -12,9 +12,15 @@ type body =
   | Expression of Expr.t
   | Output of { msg : Expr.t; value : Expr.t }
   | Return of Expr.t option
+  | Unhandled of Id.t
 
 and switch_case = { case : Expr.t; sw_body : t }
 and t = { location : Location.t; body : body }
+
+let unhandled ~irep:_ id =
+  (* TODO: hide the following line under a config flag. *)
+  (* Fmt.pr "%a\n@?" Yojson.Safe.pretty_print (Irep.to_yojson irep); *)
+  Unhandled id
 
 let rec pp ft (t : t) =
   let open Fmt in
@@ -51,6 +57,7 @@ let rec pp ft (t : t) =
   | Output { msg; value } ->
       pf ft "@[<v 3>output (%a, %a);@]" Expr.pp msg Expr.pp value
   | Switch _ -> pf ft "switch"
+  | Unhandled id -> pf ft "UNHANDLED_STMT(%s)" (Id.to_string id)
 
 (** Lifting from Irep *)
 open Irep.Infix
@@ -130,7 +137,7 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       let msg = expr_of_irep msg in
       let value = expr_of_irep value in
       Output { msg; value }
-  | id -> Gerror.unhandled ~irep (Statement id)
+  | id -> unhandled ~irep id
 
 and switch_cases_of_irep ~machine l =
   let is_default irep =

@@ -51,10 +51,6 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
   |> Hashtbl.iter (fun name (sym : Irep_lib.Symbol.t) ->
          if sym.is_file_local || should_be_filtered name then ()
          else
-           let () =
-             if sym.is_weak || sym.is_volatile then
-               Gerror.unhandled WeakOrVolatile
-           in
            let location = Location.of_irep sym.location in
            let type_ = Type.of_irep ~machine sym.type_ in
            let value = SymbolValue.of_irep ~machine ~type_ sym.value in
