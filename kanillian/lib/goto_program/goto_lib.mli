@@ -156,6 +156,7 @@ and Type : sig
     | Empty
   [@@deriving show, eq]
 
+  val show_simple : t -> string
   val size_of : machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> int
 
   val offset_struct_field :

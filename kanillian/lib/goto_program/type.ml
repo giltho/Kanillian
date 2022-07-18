@@ -17,6 +17,25 @@ type t = Typedefs__.type_ =
   | Empty
 
 let show t = Typedefs__.show_type_ t
+
+let show_simple = function
+  | Array _ -> "Array"
+  | Bool -> "Bool"
+  | CInteger t -> "CInteger::" ^ IntType.show t
+  | Float -> "Float"
+  | Double -> "Double"
+  | Signedbv { width } -> "i" ^ string_of_int width
+  | Unsignedbv { width } -> "u" ^ string_of_int width
+  | Code _ -> "Code"
+  | Pointer _ -> "Pointer"
+  | Struct _ -> "Struct"
+  | IncompleteStruct _ -> "IncompleteStruct"
+  | StructTag _ -> "StructTag"
+  | Union _ -> "Union"
+  | UnionTag _ -> "UnionTag"
+  | Constructor -> "Constructor"
+  | Empty -> "Empty"
+
 let pp fmt t = Typedefs__.pp_type_ fmt t
 let equal ta tb = Typedefs__.equal_type_ ta tb
 

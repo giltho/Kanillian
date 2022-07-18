@@ -50,10 +50,12 @@ module Unhandled = struct
         ^
         match types with
         | None -> ""
-        | Some (ta, tb) -> "::" ^ Type.show ta ^ "::" ^ Type.show tb)
-    | LoadScalar t -> "LoadScalar::" ^ Type.show t
-    | StoreScalar t -> "StoreScalar::" ^ Type.show t
-    | Cast (from, to_) -> "Cast::" ^ Type.show from ^ "::" ^ Type.show to_
+        | Some (ta, tb) ->
+            "::" ^ Type.show_simple ta ^ "::" ^ Type.show_simple tb)
+    | LoadScalar t -> "LoadScalar::" ^ Type.show_simple t
+    | StoreScalar t -> "StoreScalar::" ^ Type.show_simple t
+    | Cast (from, to_) ->
+        "Cast::" ^ Type.show_simple from ^ "::" ^ Type.show_simple to_
     | ExprIrep (id, msg) -> "ExprIrep::" ^ Irep_lib.Id.to_string id ^ "::" ^ msg
     | StmtIrep id -> "StmtIrep::" ^ Irep_lib.Id.to_string id
 
@@ -77,5 +79,5 @@ end
 
 let report file =
   let unhandled = Unhandled.json_stats () in
-  let json = `Assoc [ ("unhandled", unhandled) ] in
+  let json = `Assoc [ ("at_compilation", unhandled) ] in
   Yojson.Safe.to_file file json
