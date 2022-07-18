@@ -85,7 +85,7 @@ proc i__cbmc_binop_cmpu_ne(v1, v2) {
         return
 };
 
-proc i__binop_cbmc_cmplu_le(v1, v2) {
+proc i__cbmc_binop_cmplu_le(v1, v2) {
         goto [ (l-nth(v1, 0i) = "long") and (l-nth(v2, 0i) = "long") ] blon unde;
   blon: ret := (l-nth(v1, 1i) i<= l-nth(v2, 1i));
         return;

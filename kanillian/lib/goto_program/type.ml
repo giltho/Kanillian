@@ -206,10 +206,12 @@ let rec bit_offset_struct_field ~machine ~tag_lookup ty field =
           aux acc r
   in
   match ty with
-  | Struct { components; _ } -> aux 0 components
-  | StructTag s ->
+  | Struct { components; _ } | Union { components; _ } -> aux 0 components
+  | StructTag s | UnionTag s ->
       bit_offset_struct_field ~machine ~tag_lookup (tag_lookup s) field
-  | _ -> Gerror.code_error "bit_offset_struct_field for non-struct"
+  | _ ->
+      Gerror.code_error
+        ("bit_offset_struct_field for non-struct-or-union but: " ^ show ty)
 
 let offset_struct_field ~machine ~tag_lookup ty field =
   bit_offset_struct_field ~machine ~tag_lookup ty field / 8

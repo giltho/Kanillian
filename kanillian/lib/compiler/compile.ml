@@ -61,7 +61,6 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   (* We can't output nothing, as a label might have to get attached *)
   | Assert { property_class = Some "cover"; _ } -> [ b Skip ]
   | Assert { cond; property_class = _ } ->
-      Fmt.pr "%a\n@?" GExpr.pp cond;
       let e, pre = compile_expr cond in
       let e = Val_repr.as_value ~msg:"Assert operand" e in
       let e =
