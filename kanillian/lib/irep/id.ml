@@ -2458,6 +2458,4 @@ let to_z_opt s = try Some (to_z s) with Invalid_argument _ -> None
 
 let to_bitpattern ~width ~signed id =
   let bits = Kutils.z_of_hex (to_string id) in
-  if signed && Z.gt bits (Z.shift_left Z.one (width - 3)) then
-    failwith "cannot handle bitpatterns properly yet";
-  bits
+  if signed then Z.signed_extract bits 0 width else bits
