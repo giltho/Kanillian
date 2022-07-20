@@ -25,8 +25,8 @@ open Helpers
 open Compile_expr
 
 let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
-  let compile_statement = compile_statement ~ctx in
-  let compile_expr = compile_expr ~ctx in
+  let compile_statement_c = compile_statement ~ctx in
+  let compile_expr_c = compile_expr ~ctx in
   let loc = Body_item.compile_location stmt.location in
   let id = stmt.location.origin_id in
   let b = Body_item.make ~loc ~id in
@@ -40,11 +40,11 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let set_first_label label stmts = set_first_label_opt (Some label) stmts in
   match stmt.body with
   | Skip -> [ b Skip ]
-  | Block ss -> List.concat_map compile_statement ss
-  | Label (s, ss) -> List.concat_map compile_statement ss |> set_first_label s
+  | Block ss -> List.concat_map compile_statement_c ss
+  | Label (s, ss) -> List.concat_map compile_statement_c ss |> set_first_label s
   | Goto lab -> [ b (Goto lab) ]
   | Assume { cond } ->
-      let e, pre = compile_expr cond in
+      let e, pre = compile_expr_c cond in
       let e = Val_repr.as_value ~msg:"Assume operand" e in
       (* FIXME: hack to avoid wrong compilation to be in the way.
          Remove that later. *)
@@ -61,7 +61,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   (* We can't output nothing, as a label might have to get attached *)
   | Assert { property_class = Some "cover"; _ } -> [ b Skip ]
   | Assert { cond; property_class = _ } ->
-      let e, pre = compile_expr cond in
+      let e, pre = compile_expr_c cond in
       let e = Val_repr.as_value ~msg:"Assert operand" e in
       let e =
         Expr.subst_expr_for_expr ~to_subst:(Expr.Lit Nono)
@@ -78,7 +78,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         match e with
         | Some e ->
             let open Cs.Syntax in
-            let* e = compile_expr e in
+            let* e = compile_expr_c e in
             (* Return_by_copy should copy the value in the last first of the function,
                which contains the ret value.
                For now, I don't have that, I need to also change how functions are compiled *)
@@ -110,7 +110,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
           match value with
           | None -> []
           | Some e ->
-              let v, pre = compile_expr e in
+              let v, pre = compile_expr_c e in
               let v =
                 Val_repr.as_value ~error:Error.code_error
                   ~msg:"declaration initial value for in-memory scalar access" v
@@ -123,7 +123,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         let v, s =
           match value with
           | Some e ->
-              let e, s = compile_expr e in
+              let e, s = compile_expr_c e in
               let e =
                 Val_repr.as_value ~error:Error.code_error
                   ~msg:"in memory scalar" e
@@ -136,7 +136,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
       body
   | Expression e ->
-      let _, s = compile_expr e in
+      let _, s = compile_expr_c e in
       s
   | FunctionCall { lhs; func; args } -> (
       let v, pre1 = compile_call ~ctx ~add_annot:b func args in
@@ -161,18 +161,17 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
           pre1 @ pre2 @ write)
   | Switch { control; cases; default } ->
       let end_lab = Ctx.fresh_lab ctx in
-      let goto_end = Cmd.Goto end_lab in
       let next_lab = ref None in
       let control_ty = control.type_ in
-      let control, control_s = compile_expr control in
-      let rec compile_cases ?(acc = []) = function
+      let control, control_s = compile_expr_c control in
+      let rec compile_cases ~ctx ?(acc = []) = function
         | [] -> acc
         | case :: rest ->
             let cur_lab = !next_lab in
             let nlab = Ctx.fresh_lab ctx in
-            let () = next_lab := Some nlab in
+            next_lab := Some nlab;
             let guard = case.Stmt.case in
-            let guard_e, guard_s = compile_expr guard in
+            let guard_e, guard_s = compile_expr ~ctx guard in
             let equal_v, comparison_calls =
               compile_binop ~ctx ~lty:control_ty ~rty:guard.type_ Equal control
                 guard_e
@@ -182,26 +181,32 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
                 (Body_item.make_hloc ~loc:guard.location)
                 comparison_calls
             in
-            let block = compile_statement case.sw_body in
+            let block = compile_statement ~ctx case.sw_body in
             let block_lab, block = Body_item.get_or_set_fresh_lab ~ctx block in
             let goto_block = Cmd.GuardedGoto (equal_v, block_lab, nlab) in
             let total_block =
               set_first_label_opt cur_lab
-                (guard_s @ comparison_calls @ block
-                @ [ b goto_block; b goto_end ])
+                (guard_s @ comparison_calls @ [ b goto_block ] @ block)
             in
-            let acc = total_block @ acc in
-            compile_cases ~acc rest
+            let acc = acc @ total_block in
+            compile_cases ~ctx ~acc rest
       in
-      let compiled_cases = compile_cases cases in
+      let compiled_cases =
+        Ctx.with_break ctx end_lab (fun ctx -> compile_cases ~ctx cases)
+      in
       let default_block =
         match default with
         | None -> [ b ?label:!next_lab Skip ]
         | Some default ->
-            set_first_label_opt !next_lab (compile_statement default)
+            Ctx.with_break ctx end_lab (fun ctx ->
+                set_first_label_opt !next_lab (compile_statement ~ctx default))
       in
       let end_ = [ b ~label:end_lab Skip ] in
       control_s @ compiled_cases @ default_block @ end_
+  | Break -> (
+      match ctx.break_lab with
+      | None -> Error.unexpected "Break call outside of loop of switch"
+      | Some break_lab -> [ b (Cmd.Goto break_lab) ])
   | Unhandled id -> [ b (assert_unhandled ~feature:(StmtIrep id) []) ]
   | Output _ ->
       let () = Stats.Unhandled.signal OutputStmt in

@@ -4,12 +4,14 @@ module GType = Goto_lib.Type
 module GExpr = Goto_lib.Expr
 
 type access =
+  | InMemoryFunction of { ptr : Expr.t }
   | InMemoryScalar of { ptr : Expr.t; loaded : Expr.t option }
   | InMemoryComposit of { ptr : Expr.t; type_ : GType.t }
       (** For copy, we just need the size, not the type.
           However, in the future, we might copy fields
           one-by-one to preserve the correct semantics of C *)
   | Direct of string
+  | DirectFunction of string
   | ZST
 [@@deriving show { with_path = false }]
 
@@ -91,6 +93,7 @@ let compile_binop
             `App (fun num ptr -> Memory.ptr_add_v ptr num)
         | Pointer _, CInteger (I_size_t | I_ssize_t) -> `App Memory.ptr_add_v
         | _ -> `Unhandled true)
+    | Or -> `GilBinop BinOp.BOr
     | _ -> `Unhandled false
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
@@ -103,6 +106,7 @@ let compile_binop
       in
       Cs.return ~app:[ call ] (Expr.PVar gvar)
   | `App f -> Cs.return (f e1 e2)
+  | `GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
   | `Unhandled with_type ->
       let type_info = if with_type then Some (lty, rty) else None in
       let cmd =
@@ -258,7 +262,8 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
     match lvalue.value with
     | Symbol x ->
         if Ctx.is_local ctx x then
-          if not (Ctx.representable_in_store ctx lvalue.type_) then
+          if GType.is_function lvalue.type_ then Cs.return (DirectFunction x)
+          else if not (Ctx.representable_in_store ctx lvalue.type_) then
             Cs.return (InMemoryComposit { ptr = PVar x; type_ = lvalue.type_ })
           else if Ctx.in_memory ctx x then
             Cs.return (InMemoryScalar { ptr = PVar x; loaded = None })
@@ -272,13 +277,13 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
             Cmd.Assignment
               (ptr, EList [ Expr.list_nth (PVar sym_and_loc) 1; Expr.zero_i ])
           in
-          if Ctx.representable_in_store ctx lvalue.type_ then
-            Cs.return
-              ~app:[ b act; b assign ]
-              (InMemoryScalar { ptr = PVar ptr; loaded = None })
-          else
-            Cs.return
-              (InMemoryComposit { ptr = PVar ptr; type_ = lvalue.type_ })
+          let ptr = Expr.PVar ptr in
+          let return = Cs.return ~app:[ b act; b assign ] in
+          if GType.is_function lvalue.type_ then
+            return (InMemoryFunction { ptr })
+          else if Ctx.representable_in_store ctx lvalue.type_ then
+            return (InMemoryScalar { ptr; loaded = None })
+          else return (InMemoryComposit { ptr; type_ = lvalue.type_ })
     | Dereference e -> (
         let* ge = compile_expr ~ctx e in
         match ge with
@@ -286,7 +291,9 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
             (* We do read the memory, but it might be a "fake read".
                We don't necessarily need the value if we're going get its address
                 (i.e &*p). Therefore, we keep both the value and the pointer around. *)
-            if not (Ctx.representable_in_store ctx lvalue.type_) then
+            if GType.is_function lvalue.type_ then
+              Cs.return (InMemoryFunction { ptr = ge })
+            else if not (Ctx.representable_in_store ctx lvalue.type_) then
               (* In the read case, some validity should be checked *)
               Cs.return (InMemoryComposit { ptr = ge; type_ = lvalue.type_ })
             else if read then
@@ -296,7 +303,8 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
         | ByCopy _ ->
             Error.unexpected
               "Dereferencing a composit value, pointers should be passed by \
-               value")
+               value"
+        | Procedure _ -> Error.unexpected "Dereferencing a procedure")
     | Index _ ->
         let cmd = b (Helpers.assert_unhandled ~feature:ArrayIndex []) in
         Cs.return ~app:[ cmd ] (dummy_access ~ctx lvalue.type_)
@@ -337,8 +345,8 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
   let by_copy ?app ptr type_ =
     Cs.return ?app (Val_repr.ByCopy { ptr; type_ })
   in
-  match GExpr.as_symbol func with
-  | "__CPROVER_assume" ->
+  match func.value with
+  | Symbol "__CPROVER_assume" ->
       let to_assume =
         match args with
         | [ to_assume ] -> to_assume
@@ -369,13 +377,13 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
       let f =
         match Formula.lift_logic_expr to_assume with
         | None ->
-            Error.code_error
-              (Fmt.str "obtained weird expression that cannot be asserted: %a"
-                 Expr.pp to_assume)
+            Logging.normal ~severity:Warning (fun m ->
+                m "Cannot assume %a, assuming False instead" Expr.pp to_assume);
+            Formula.False
         | Some (f, _) -> f
       in
       by_value ~app:[ b (Logic (Assume f)) ] (Lit Null)
-  | "__CPROVER_assert" ->
+  | Symbol "__CPROVER_assert" ->
       (* The second argument of assert is a string that we may to keep
          alive for error messages. For now we're discarding it.
          In the future, we could change Gillian's assume to also have an error message *)
@@ -410,14 +418,20 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
       let f =
         match Formula.lift_logic_expr to_assert with
         | None ->
-            Error.code_error
-              (Fmt.str "obtained weird expression that cannot be asserted: %a"
-                 Expr.pp to_assert)
+            Logging.normal ~severity:Warning (fun m ->
+                m "Cannot assert %a, asserting False instead" Expr.pp to_assert);
+            Formula.False
         | Some (f, _) -> f
       in
       by_value ~app:[ b (Logic (Assert f)) ] (Expr.Lit Null)
   | _ ->
-      let fname = GExpr.as_symbol func in
+      let* e = compile_expr ~ctx func in
+      let fname =
+        match e with
+        | Procedure e -> e
+        | _ ->
+            Error.code_error "function call of something that isn't a procedure"
+      in
       let* args = Cs.many (compile_expr ~ctx) args in
       let* args =
         Cs.many
@@ -430,9 +444,7 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
          It's a trick of CompCert.*)
       if Ctx.representable_in_store ctx return_type then
         let ret_var = Ctx.fresh_v ctx in
-        let gil_call =
-          Cmd.Call (ret_var, Lit (String fname), args, None, None)
-        in
+        let gil_call = Cmd.Call (ret_var, fname, args, None, None) in
         by_value ~app:[ b gil_call ] (Expr.PVar ret_var)
       else
         let* temp_arg =
@@ -440,8 +452,7 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         in
         let unused_temp = Ctx.fresh_v ctx in
         let gil_call =
-          Cmd.Call
-            (unused_temp, Lit (String fname), temp_arg :: args, None, None)
+          Cmd.Call (unused_temp, fname, temp_arg :: args, None, None)
         in
         by_copy ~app:[ b gil_call ] temp_arg return_type
 
@@ -513,14 +524,29 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         | InMemoryScalar { loaded = None; ptr } ->
             let* var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
             by_value (PVar var)
-        | InMemoryComposit { ptr; type_ } -> by_copy ptr type_)
+        | InMemoryComposit { ptr; type_ } -> by_copy ptr type_
+        | InMemoryFunction { ptr } ->
+            let symbol = Ctx.fresh_v ctx in
+            let get_name =
+              Cgil_lib.CConstants.Internal_Functions.get_function_name
+            in
+            let call =
+              Cmd.Call (symbol, Lit (String get_name), [ ptr ], None, None)
+            in
+            Cs.return ~app:[ b call ] (Val_repr.Procedure (Expr.PVar symbol))
+        | DirectFunction symbol ->
+            Cs.return (Val_repr.Procedure (Lit (String symbol))))
   | AddressOf x -> (
       let* access = lvalue_as_access ~ctx ~read:true x in
       match access with
       | ZST ->
           by_value
             (Expr.EList [ Lit (String "dangling"); Lit (String "pointer") ])
-      | InMemoryScalar { ptr; _ } | InMemoryComposit { ptr; _ } -> by_value ptr
+      | InMemoryScalar { ptr; _ }
+      | InMemoryComposit { ptr; _ }
+      | InMemoryFunction { ptr; _ } -> by_value ptr
+      | DirectFunction symbol ->
+          Error.code_error ("addres of direct access to function: " ^ symbol)
       | Direct x -> Error.code_error ("address of direct access to " ^ x))
   | BoolConstant b -> by_value (Lit (Bool b))
   | CBoolConstant b ->

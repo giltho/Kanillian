@@ -71,6 +71,7 @@ type t = {
   allocated_temps : Local.t Hashset.t;
   fresh_lab : unit -> string;
   harness : string option;
+  break_lab : string option;
 }
 
 let make ~machine ~prog ~harness () =
@@ -84,6 +85,7 @@ let make ~machine ~prog ~harness () =
     fresh_lv = Generators.temp_lvar ();
     fresh_lab = Generators.label ();
     harness;
+    break_lab = None;
   }
 
 let with_new_generators t = { t with fresh_v = Generators.temp_var () }
@@ -127,3 +129,7 @@ let archi ctx =
   | 32 -> `Archi32
   | 64 -> `Archi64
   | _ -> Error.unexpected "Archi that is neither 64 nor 32"
+
+let with_break ctx lab f =
+  let ctx = { ctx with break_lab = Some lab } in
+  f ctx

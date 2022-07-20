@@ -213,6 +213,7 @@ module Stmt : sig
         cases : switch_case list;
         default : t option;
       }
+    | Break
     | Skip
     | Expression of Expr.t
     | Output of { msg : Expr.t; value : Expr.t }

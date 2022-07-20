@@ -8,6 +8,7 @@ type body =
   | Goto of string
   | FunctionCall of { lhs : Expr.t option; func : Expr.t; args : Expr.t list }
   | Switch of { control : Expr.t; cases : switch_case list; default : t option }
+  | Break
   | Skip
   | Expression of Expr.t
   | Output of { msg : Expr.t; value : Expr.t }
@@ -57,6 +58,7 @@ let rec pp ft (t : t) =
   | Output { msg; value } ->
       pf ft "@[<v 3>output (%a, %a);@]" Expr.pp msg Expr.pp value
   | Switch _ -> pf ft "switch"
+  | Break -> pf ft "break"
   | Unhandled id -> pf ft "UNHANDLED_STMT(%s)" (Id.to_string id)
 
 (** Lifting from Irep *)
@@ -124,7 +126,8 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
         | Block -> ()
         | _ -> unexpected "Switch body is not a block"
       in
-      let cases, default = switch_cases_of_irep ~machine content.sub in
+      let cases, k, default = switch_cases_of_irep ~machine content.sub in
+      if not (k == []) then unexpected "Switch body doesn't start with a case";
       Switch { control; cases; default }
   | FunctionCall ->
       let lhs, func, args = exactly_three ~msg:"FunctionCall stmt" irep in
@@ -137,42 +140,53 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       let msg = expr_of_irep msg in
       let value = expr_of_irep value in
       Output { msg; value }
+  | Break -> Break
   | id -> unhandled ~irep id
 
 and switch_cases_of_irep ~machine l =
+  let is_switch_case irep =
+    match (irep $ Statement).id with
+    | SwitchCase -> true
+    | _ -> false
+  in
   let is_default irep =
     match irep $? Default with
     | Some { id = Id1; _ } -> true
     | _ -> false
   in
   match l with
-  | [] -> ([], None)
+  | [] -> ([], [], None)
   | irep :: r when is_default irep -> (
-      let unexpected = Gerror.unexpected ~irep in
-      let () =
-        match (irep $ Statement).id with
-        | SwitchCase -> ()
-        | _ ->
-            unexpected
-              "Switch body contains something that is not a switch case"
-      in
+      if not (is_switch_case irep) then
+        Gerror.unexpected ~irep "Default case is not a SwitchCase";
       let _, stmt = exactly_two ~msg:"default switch_case" irep in
       match switch_cases_of_irep ~machine r with
-      | rest, None -> (rest, Some (of_irep ~machine stmt))
-      | _, Some _ -> unexpected "two default switch_cases!")
-  | irep :: r ->
-      let () =
-        match (irep $ Statement).id with
-        | SwitchCase -> ()
-        | _ ->
-            Gerror.unexpected ~irep
-              "Switch body contains something that is not a switch case"
-      in
-      let cases, default = switch_cases_of_irep ~machine r in
+      | rest, rest_of_case, None ->
+          let block =
+            let this_body = of_irep ~machine stmt in
+            {
+              body = Block (this_body :: rest_of_case);
+              location = this_body.location;
+            }
+          in
+          (rest, [], Some block)
+      | _, _, Some _ -> Gerror.unexpected "two default switch_cases!")
+  | irep :: r when is_switch_case irep ->
+      let cases, rest_of_case, default = switch_cases_of_irep ~machine r in
       let case, body = exactly_two irep in
       let case = Expr.of_irep ~machine case in
-      let sw_body = of_irep ~machine body in
-      ({ case; sw_body } :: cases, default)
+      let this_body = of_irep ~machine body in
+      let sw_body =
+        {
+          body = Block (this_body :: rest_of_case);
+          location = this_body.location;
+        }
+      in
+      ({ case; sw_body } :: cases, [], default)
+  | irep :: r ->
+      let cases, rest_of_case, default = switch_cases_of_irep ~machine r in
+      let content = of_irep ~machine irep in
+      (cases, content :: rest_of_case, default)
 
 and of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
   let location = Location.sloc_in_irep irep in
