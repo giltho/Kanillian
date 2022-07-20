@@ -804,7 +804,7 @@ let rec trans_globdefs
         (new_asrt :: init_asrts, new_cmd :: init_acts, bi_specs, fs, syms)
       else (init_asrts, init_acts, bi_specs, fs, syms)
   | (id, Gvar v) :: r
-    when Camlcoq.Z.to_int (init_data_list_size v.gvar_init) == 0 ->
+    when Camlcoq.Z.eq (init_data_list_size v.gvar_init) Camlcoq.Z.zero ->
       (* Externally-defined global variable *)
       let init_asrts, init_acts, bi_specs, fs, syms = trans_globdefs r in
       let symbol = true_name id in

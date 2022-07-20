@@ -7,8 +7,37 @@ let true_name id =
   if str.[0] = '$' then Prefix.uvar ^ String.sub str 1 (String.length str - 1)
   else str
 
-let z_of_int z = Camlcoq.Z.of_sint (Z.to_int z)
-let int_of_z z = Z.of_int (Camlcoq.Z.to_int z)
+let z_of_int z =
+  let open Z in
+  let rec pos_of_int (n : Z.t) =
+    if Z.equal (n land Z.one) Z.zero then
+      Camlcoq.P.Coq_xO (pos_of_int (Z.shift_right_trunc n 1))
+    else if Z.equal n Z.one then Coq_xH
+    else Coq_xI (pos_of_int (Z.shift_right_trunc n 1))
+  in
+  match Z.sign z with
+  | 0 -> Camlcoq.Z.zero
+  | 1 -> Zpos (pos_of_int z)
+  | -1 -> Zneg (pos_of_int (Z.neg z))
+  | _ -> failwith "unreachable"
+
+let int_of_z (z : Camlcoq.Z.t) =
+  let open Z in
+  let rec int_of_pos (p : Camlcoq.P.t) =
+    match p with
+    | Coq_xH -> one
+    | Coq_xI p ->
+        let n = int_of_pos p in
+        n + n + one
+    | Coq_xO p ->
+        let n = int_of_pos p in
+        n + n
+  in
+  match z with
+  | Z0 -> zero
+  | Zpos p -> int_of_pos p
+  | Zneg p -> -int_of_pos p
+
 let string_of_chunk = Chunk.to_string
 let chunk_of_string = Chunk.of_string
 
