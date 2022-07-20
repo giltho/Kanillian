@@ -366,7 +366,9 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
 
   (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
-  let ctx = Ctx.with_entering_body ctx body in
+  let ctx =
+    Ctx.with_entering_body ctx ~params:func.params ~body ~location:func.location
+  in
   let proc_params =
     List.map
       (fun x ->
@@ -377,7 +379,14 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
-  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals) in
+  (** We add a return undef in case the function has no return *)
+  let return_undef = 
+    let b = Body_item.make ~loc:f_loc in 
+    [
+    b (Assignment (Kutils.Names.return_variable, Lit Undefined));
+    b (ReturnNormal)
+  ] in
+  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals @ return_undef) in
   Proc.
     {
       proc_name = func.symbol;

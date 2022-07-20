@@ -42,8 +42,7 @@ let is_cbmc_specific = function
   | "__CPROVER_architecture_bool_width"
   | "__CPROVER_architecture_char_width"
   | "__CPROVER_architecture_long_long_int_width"
-  | "__CPROVER_architecture_single_width"
-  | "return'" -> true
+  | "__CPROVER_architecture_single_width" -> true
   | _ -> false
 
 let sanitize_symbol s =

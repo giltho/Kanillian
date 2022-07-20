@@ -118,8 +118,16 @@ let is_zst_access ctx (ty : Type.t) =
 
 let representable_in_store ctx ty = representable_in_store ~prog:ctx.prog ty
 
-let with_entering_body ctx stmt =
-  let locals, in_memory = Local.gather ~prog:ctx.prog stmt in
+let with_entering_body ctx ~body ~params ~location =
+  (** FIXME: params in memory should be assigned when entering function body! *)
+  let locals, in_memory = Local.gather ~prog:ctx.prog body in
+  List.iter
+    (fun (p : Param.t) ->
+      Option.iter
+        (fun symbol ->
+          Hashtbl.add locals symbol Local.{ symbol; type_ = p.type_; location })
+        p.identifier)
+    params;
   let allocated_temps = Hashset.empty ~size:32 () in
   let fresh_v = Generators.temp_var () in
   { ctx with in_memory; locals; fresh_v; allocated_temps }
@@ -133,3 +141,11 @@ let archi ctx =
 let with_break ctx lab f =
   let ctx = { ctx with break_lab = Some lab } in
   f ctx
+
+let is_function_symbol ctx s =
+  match s with
+  | "__CPROVER_assert"
+  | "__CPROVER_assume"
+  | "__CPROVER_initialize"
+  | "__CPROVER__start" -> true
+  | _ -> Hashtbl.mem ctx.prog.funs s

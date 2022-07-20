@@ -4,7 +4,7 @@ module GType = Goto_lib.Type
 module GExpr = Goto_lib.Expr
 
 type access =
-  | InMemoryFunction of { ptr : Expr.t }
+  | InMemoryFunction of { ptr : Expr.t; symbol : string option }
   | InMemoryScalar of { ptr : Expr.t; loaded : Expr.t option }
   | InMemoryComposit of { ptr : Expr.t; type_ : GType.t }
       (** For copy, we just need the size, not the type.
@@ -262,28 +262,19 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
     match lvalue.value with
     | Symbol x ->
         if Ctx.is_local ctx x then
-          if GType.is_function lvalue.type_ then Cs.return (DirectFunction x)
-          else if not (Ctx.representable_in_store ctx lvalue.type_) then
+          if not (Ctx.representable_in_store ctx lvalue.type_) then
             Cs.return (InMemoryComposit { ptr = PVar x; type_ = lvalue.type_ })
           else if Ctx.in_memory ctx x then
             Cs.return (InMemoryScalar { ptr = PVar x; loaded = None })
           else (Direct x, [])
+        else if Ctx.is_function_symbol ctx x then Cs.return (DirectFunction x)
         else
-          let genvlookup = Cgil_lib.LActions.(str_ac (AGEnv GetSymbol)) in
-          let sym_and_loc = Ctx.fresh_v ctx in
-          let act = Cmd.LAction (sym_and_loc, genvlookup, [ Lit (String x) ]) in
-          let ptr = Ctx.fresh_v ctx in
-          let assign =
-            Cmd.Assignment
-              (ptr, EList [ Expr.list_nth (PVar sym_and_loc) 1; Expr.zero_i ])
-          in
-          let ptr = Expr.PVar ptr in
-          let return = Cs.return ~app:[ b act; b assign ] in
+          let+ ptr = Genv.lookup_symbol ~ctx x |> Cs.map_l b in
           if GType.is_function lvalue.type_ then
-            return (InMemoryFunction { ptr })
+            InMemoryFunction { ptr; symbol = Some x }
           else if Ctx.representable_in_store ctx lvalue.type_ then
-            return (InMemoryScalar { ptr; loaded = None })
-          else return (InMemoryComposit { ptr; type_ = lvalue.type_ })
+            InMemoryScalar { ptr; loaded = None }
+          else InMemoryComposit { ptr; type_ = lvalue.type_ }
     | Dereference e -> (
         let* ge = compile_expr ~ctx e in
         match ge with
@@ -292,7 +283,7 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
                We don't necessarily need the value if we're going get its address
                 (i.e &*p). Therefore, we keep both the value and the pointer around. *)
             if GType.is_function lvalue.type_ then
-              Cs.return (InMemoryFunction { ptr = ge })
+              Cs.return (InMemoryFunction { ptr = ge; symbol = None })
             else if not (Ctx.representable_in_store ctx lvalue.type_) then
               (* In the read case, some validity should be checked *)
               Cs.return (InMemoryComposit { ptr = ge; type_ = lvalue.type_ })
@@ -525,7 +516,9 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
             let* var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
             by_value (PVar var)
         | InMemoryComposit { ptr; type_ } -> by_copy ptr type_
-        | InMemoryFunction { ptr } ->
+        | InMemoryFunction { symbol = Some sym; _ } ->
+            Cs.return (Val_repr.Procedure (Expr.string sym))
+        | InMemoryFunction { ptr; symbol = None } ->
             let symbol = Ctx.fresh_v ctx in
             let get_name =
               Cgil_lib.CConstants.Internal_Functions.get_function_name
@@ -546,7 +539,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       | InMemoryComposit { ptr; _ }
       | InMemoryFunction { ptr; _ } -> by_value ptr
       | DirectFunction symbol ->
-          Error.code_error ("addres of direct access to function: " ^ symbol)
+          let+ ptr = Genv.lookup_symbol ~ctx symbol |> Cs.map_l b in
+          Val_repr.ByValue ptr
       | Direct x -> Error.code_error ("address of direct access to " ^ x))
   | BoolConstant b -> by_value (Lit (Bool b))
   | CBoolConstant b ->

@@ -49,7 +49,11 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
   in
   symtab
   |> Hashtbl.iter (fun name (sym : Irep_lib.Symbol.t) ->
-         if sym.is_file_local || should_be_filtered name then ()
+         (* A bit hacky, not sure which should be kept and which shouldn't... *)
+         if
+           (not (String.equal name "return'"))
+           && (sym.is_file_local || should_be_filtered name)
+         then ()
          else
            let location = Location.of_irep sym.location in
            let type_ = Type.of_irep ~machine sym.type_ in
@@ -58,7 +62,7 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
            else
              match type_ with
              | Bool ->
-                 (* We can't write pure bools in memory, so let's ignore these for now
+                 (* FIXME: We can't write pure bools in memory, so let's ignore these for now
                     A solution would be to keep track of those, and convert them
                     to and from u8 every time *)
                  ()
