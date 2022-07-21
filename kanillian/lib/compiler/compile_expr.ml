@@ -223,6 +223,7 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     Val_repr.t Cs.with_cmds =
   let cast_with =
     match (from, into) with
+    | x, y when GType.equal x y -> `Nop
     | Bool, CInteger (I_bool | I_char | I_int) ->
         `Proc Cgil_lib.CConstants.Internal_Functions.val_of_bool
     | CInteger I_int, CInteger (I_size_t | I_ssize_t) ->
