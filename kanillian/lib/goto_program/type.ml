@@ -15,6 +15,7 @@ type t = Typedefs__.type_ =
   | UnionTag of string
   | Constructor
   | Empty
+  | Vector of { type_ : t; size : int }
 
 let show t = Typedefs__.show_type_ t
 
@@ -35,6 +36,7 @@ let show_simple = function
   | UnionTag _ -> "UnionTag"
   | Constructor -> "Constructor"
   | Empty -> "Empty"
+  | Vector _ -> "Vector"
 
 let pp fmt t = Typedefs__.pp_type_ fmt t
 let equal ta tb = Typedefs__.equal_type_ ta tb
@@ -51,7 +53,7 @@ open Irep.Infix
     For example, here, there are no check that it's of the right type *)
 let size_of_irep irep =
   try
-    irep $ Value |> Irep.as_just_bitpattern ~signed:false ~width:32 |> Z.to_int
+    irep $ Value |> Irep.as_just_bitpattern ~signed:false ~width:64 |> Z.to_int
   with Not_found -> Gerror.unexpected ~irep "No size!"
 
 let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
@@ -68,6 +70,10 @@ let rec of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
       let elem_ty = List.hd irep.sub |> of_irep in
       let sz = size_of_irep (irep $ Size) in
       Array (elem_ty, sz)
+  | Vector ->
+      let type_ = List.hd irep.sub |> of_irep in
+      let size = size_of_irep (irep $ Size) in
+      Vector { type_; size }
   | Bool -> Bool
   | Floatbv -> (
       match
@@ -158,7 +164,7 @@ let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   let dc_bit_size = bit_size_of_datatype_component ~machine ~tag_lookup in
   let bit_size_of = bit_size_of ~tag_lookup ~machine in
   match t with
-  | Array (ty, sz) -> sz * bit_size_of ty
+  | Array (ty, sz) | Vector { type_ = ty; size = sz } -> sz * bit_size_of ty
   | CInteger I_bool -> machine.bool_width
   | CInteger I_int -> machine.int_width
   | CInteger I_char -> machine.char_width

@@ -35,7 +35,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
     match stmts with
     | [] -> [ b ?label Skip ]
     | (a, None, cmd) :: r -> (a, label, cmd) :: r
-    | (_, Some _, _) :: _ -> Error.code_error "First label is already set!!"
+    | (_, Some _, _) :: _ -> b ?label Skip :: stmts
   in
   let set_first_label label stmts = set_first_label_opt (Some label) stmts in
   match stmt.body with
@@ -379,14 +379,17 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
-  (** We add a return undef in case the function has no return *)
-  let return_undef = 
-    let b = Body_item.make ~loc:f_loc in 
+  (* We add a return undef in case the function has no return *)
+  let return_undef =
+    let b = Body_item.make ~loc:f_loc in
     [
-    b (Assignment (Kutils.Names.return_variable, Lit Undefined));
-    b (ReturnNormal)
-  ] in
-  let proc_body = Array.of_list (compile_statement ~ctx body @ free_locals @ return_undef) in
+      b (Assignment (Kutils.Names.return_variable, Lit Undefined));
+      b ReturnNormal;
+    ]
+  in
+  let proc_body =
+    Array.of_list (compile_statement ~ctx body @ free_locals @ return_undef)
+  in
   Proc.
     {
       proc_name = func.symbol;

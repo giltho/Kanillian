@@ -533,8 +533,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       let* access = lvalue_as_access ~ctx ~read:true x in
       match access with
       | ZST ->
-          by_value
-            (Expr.EList [ Lit (String "dangling"); Lit (String "pointer") ])
+          unhandled ZstAddress
+          (* Should probably just return a long, with a nondet value that has the right offset *)
       | InMemoryScalar { ptr; _ }
       | InMemoryComposit { ptr; _ }
       | InMemoryFunction { ptr; _ } -> by_value ptr
@@ -572,6 +572,12 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       in
       let lit = Gcu.Vt.gil_of_compcert ccert_value in
       by_value (Lit lit)
+  | DoubleConstant f ->
+      let typ = Cgil_lib.CConstants.VTypes.float_type in
+      by_value (Lit (LList [ String typ; Num f ]))
+  | FloatConstant f ->
+      let typ = Cgil_lib.CConstants.VTypes.single_type in
+      by_value (Lit (LList [ String typ; Num f ]))
   | BinOp { op; lhs; rhs } ->
       let* e1 = compile_expr lhs in
       let* e2 = compile_expr rhs in
@@ -595,7 +601,9 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
   | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
   | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
   | ByteExtract _ -> unhandled ByteExtract
-  | Struct _ -> unhandled StructConstant
+  | Struct _ ->
+      unhandled StructConstant
+      (* Alright that's next. Probably, in this case, it's something like "ByCompositValue, with a bunch of write operations and offsets"*)
   | Array _ -> unhandled ArrayConstant
   | StringConstant _ -> unhandled StringConstant
   | Unhandled (id, msg) -> unhandled (ExprIrep (id, msg))

@@ -25,6 +25,7 @@ module Unhandled = struct
     | StringConstant
     | OutputStmt
     | ArrayIndex
+    | ZstAddress
     | BinOp of Ops.Binary.t * (Type.t * Type.t) option
     | UnOp of Ops.Unary.t
     | LoadScalar of Type.t
@@ -44,6 +45,7 @@ module Unhandled = struct
     | StringConstant -> "StringConstant"
     | OutputStmt -> "OutputStmt"
     | ArrayIndex -> "ArrayIndex"
+    | ZstAddress -> "ZstAddress"
     | UnOp unop -> "Unop::" ^ Ops.Unary.show unop
     | BinOp (b, types) -> (
         "Binop::" ^ Ops.Binary.show b

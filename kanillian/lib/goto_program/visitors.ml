@@ -28,7 +28,8 @@ class ['a] iter =
     method visit_type ~(ctx : 'a) (type_ : Type.t) =
       match type_ with
       | CInteger int_ty -> self#visit_int_type ~ctx int_ty
-      | Array (t, _) | Pointer t -> self#visit_type ~ctx t
+      | Array (type_, _) | Vector { type_; _ } | Pointer type_ ->
+          self#visit_type ~ctx type_
       | Code { params; return_type } ->
           List.iter
             (fun ({ type_; _ } : Param.t) -> self#visit_type ~ctx type_)
@@ -76,6 +77,8 @@ class ['a] iter =
       | BoolConstant _
       | PointerConstant _
       | StringConstant _
+      | DoubleConstant _
+      | FloatConstant _
       | Unhandled _ -> ()
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
@@ -173,6 +176,9 @@ class ['a] map =
       | Array (t, sz) ->
           let new_t = self#visit_type ~ctx t in
           if new_t == t then type_ else Array (new_t, sz)
+      | Vector { type_ = t; size } ->
+          let new_t = self#visit_type ~ctx t in
+          if new_t == t then type_ else Vector { type_ = new_t; size }
       | Pointer t ->
           let new_t = self#visit_type ~ctx t in
           if new_t == t then type_ else Pointer new_t
@@ -278,6 +284,8 @@ class ['a] map =
       | BoolConstant _
       | PointerConstant _
       | StringConstant _
+      | DoubleConstant _
+      | FloatConstant _
       | Unhandled _ -> ev
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =

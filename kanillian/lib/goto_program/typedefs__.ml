@@ -15,6 +15,7 @@ type type_ =
   | UnionTag of string
   | Constructor
   | Empty
+  | Vector of { type_ : type_; size : int }
 
 (* | Signedbv of { width : int }
    | Unsignedbv of { width : int } *)

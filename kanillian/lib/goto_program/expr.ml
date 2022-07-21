@@ -4,6 +4,8 @@ type value =
   | CBoolConstant of bool
   | BoolConstant of bool
   | PointerConstant of int
+  | DoubleConstant of float
+  | FloatConstant of float (* FIXME: OCaml doesn't have 32-bit floats, how to handle that? *)
   | Symbol of string
   | FunctionCall of { func : t; args : t list }
   | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
@@ -33,6 +35,8 @@ let pp ft t =
     | Assign { lhs; rhs } -> pf ft "%a = %a" pp lhs pp rhs
     | IntConstant z -> pf ft "%a" Z.pp_print z
     | CBoolConstant b -> pf ft "%d" (if b then 1 else 0)
+    | DoubleConstant f -> pf ft "%f" f
+    | FloatConstant f -> pf ft "%fF" f
     | PointerConstant 0 -> pf ft "NULL"
     | PointerConstant k -> pf ft "POINTER(%d)" k
     | Symbol s -> pf ft "%s" s
@@ -62,10 +66,11 @@ let pp ft t =
 
 let show = Fmt.to_to_string pp
 
-let unhandled ~irep:_ id msg =
+let unhandled ~irep id msg =
   (* TODO: hide the next line behind a config flag *)
-  (* Fmt.pr "UNHANDLED_IREP: %a\n@?"
-     Yojson.Safe.pretty_print (Irep.to_yojson irep); *)
+  Fmt.pr "UNHANDLED_IREP: %a\n@?"
+    (Yojson.Safe.pretty_print ~std:true)
+    (Irep.to_yojson irep);
   Unhandled (id, msg)
 
 let as_symbol e =
@@ -162,6 +167,21 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
           match (irep $ Value).id with
           | NULL -> PointerConstant 0
           | _ -> unhandled ~irep Constant "Non0PointerConstant")
+      | Double ->
+          let v =
+            irep $ Value |> Irep.as_just_bitpattern ~width:64 ~signed:false
+          in
+          (* We have to use this dirty hack because Z.to_int64 can overflow.
+             That is because int64 are signed and we need them unsigned.
+             However, Int.of_string "0u....". will have the right behaviour *)
+          let i64 = "0u" ^ Z.to_string v |> Int64.of_string in
+          DoubleConstant (Int64.float_of_bits i64)
+      | Float ->
+          let v =
+            irep $ Value |> Irep.as_just_bitpattern ~width:32 ~signed:false
+          in
+          let i32 = "0u" ^ Z.to_string v |> Int32.of_string in
+          FloatConstant (Int32.float_of_bits i32)
       | ty -> unhandled ~irep Constant ("WithType::" ^ Type.show ty))
   | StringConstant -> StringConstant (irep $ Value |> Irep.as_just_string)
   | ByteExtractBigEndian when machine.is_big_endian ->

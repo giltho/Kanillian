@@ -154,6 +154,7 @@ and Type : sig
     | UnionTag of string
     | Constructor
     | Empty
+    | Vector of { type_ : t; size : int }
   [@@deriving show, eq]
 
   val show_simple : t -> string
@@ -173,6 +174,8 @@ module Expr : sig
     | CBoolConstant of bool
     | BoolConstant of bool
     | PointerConstant of int
+    | DoubleConstant of float
+    | FloatConstant of float
     | Symbol of string
     | FunctionCall of { func : t; args : t list }
     | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }

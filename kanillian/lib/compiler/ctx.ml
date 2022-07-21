@@ -119,7 +119,7 @@ let is_zst_access ctx (ty : Type.t) =
 let representable_in_store ctx ty = representable_in_store ~prog:ctx.prog ty
 
 let with_entering_body ctx ~body ~params ~location =
-  (** FIXME: params in memory should be assigned when entering function body! *)
+  (* FIXME: params in memory should be assigned when entering function body! *)
   let locals, in_memory = Local.gather ~prog:ctx.prog body in
   List.iter
     (fun (p : Param.t) ->
