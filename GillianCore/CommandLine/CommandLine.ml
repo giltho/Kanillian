@@ -460,6 +460,7 @@ struct
         entry_point
         json_ui
         () =
+      let () = Fmt_tty.setup_std_outputs () in
       let () = Config.json_ui := json_ui in
       let () = Config.current_exec_mode := Symbolic in
       let () = Printexc.record_backtrace @@ L.Mode.enabled () in
