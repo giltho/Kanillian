@@ -114,10 +114,13 @@ let compile_binop
       in
       Cs.return ~app:[ cmd ] (Expr.Lit Nono)
 
-let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
-  let llvar = Expr.LVar lvar in
-  Cs.unit
-  @@
+let fresh_sv ctx =
+  let v = Ctx.fresh_v ctx in
+  let cmd = Cmd.Logic (FreshSVar v) in
+  Cs.return ~app:[ cmd ] v
+
+let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
+  let open Cs.Syntax in
   match type_ with
   | CInteger ty ->
       let open Cgil_lib.CConstants.VTypes in
@@ -127,68 +130,61 @@ let assume_type ~ctx (type_ : GType.t) (lvar : string) : unit Cs.with_cmds =
         | I_size_t | I_ssize_t ->
             if Ctx.archi ctx == `Archi64 then long_type else int_type
       in
-      let value = Ctx.fresh_lv ctx in
-      let e_value = Expr.LVar value in
+      let* value = fresh_sv ctx in
+      let value = Expr.PVar value in
       let assume_list =
-        let f =
-          Formula.Eq (llvar, EList [ Lit (String str_constr); e_value ])
-        in
+        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
         Cmd.Logic (Assume f)
       in
       let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
-      [ assume_list; assume_int ]
+      Cs.unit [ assume_list; assume_int ]
   | Double ->
       let open Cgil_lib.CConstants.VTypes in
-      let value = Ctx.fresh_lv ctx in
-      let e_value = Expr.LVar value in
+      let* value = fresh_sv ctx in
+      let value = Expr.PVar value in
       let assume_list =
-        let f =
-          Formula.Eq (llvar, EList [ Lit (String float_type); e_value ])
-        in
+        let f = Formula.Eq (expr, EList [ Lit (String float_type); value ]) in
         Cmd.Logic (Assume f)
       in
       let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
-      [ assume_list; assume_num ]
+      Cs.unit [ assume_list; assume_num ]
   | Float ->
       let open Cgil_lib.CConstants.VTypes in
-      let value = Ctx.fresh_lv ctx in
-      let e_value = Expr.LVar value in
+      let* value = fresh_sv ctx in
+      let value = Expr.PVar value in
       let assume_list =
-        let f =
-          Formula.Eq (llvar, EList [ Lit (String single_type); e_value ])
-        in
+        let f = Formula.Eq (expr, EList [ Lit (String single_type); value ]) in
         Cmd.Logic (Assume f)
       in
       let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
-      [ assume_list; assume_num ]
+      Cs.unit [ assume_list; assume_num ]
   | Pointer _ ->
-      let loc = Ctx.fresh_lv ctx in
-      let ofs = Ctx.fresh_lv ctx in
-      let e_loc = Expr.LVar loc in
-      let e_ofs = Expr.LVar ofs in
+      let* loc = fresh_sv ctx in
+      let* ofs = fresh_sv ctx in
+      let e_loc = Expr.PVar loc in
+      let e_ofs = Expr.PVar ofs in
       let assume_list =
-        let f = Formula.Eq (llvar, EList [ e_loc; e_ofs ]) in
+        let f = Formula.Eq (expr, EList [ e_loc; e_ofs ]) in
         Cmd.Logic (Assume f)
       in
-      let assume_obj = Cmd.Logic (AssumeType (loc, ObjectType)) in
-      let assume_int = Cmd.Logic (AssumeType (ofs, IntType)) in
-      [ assume_list; assume_obj; assume_int ]
+      let assume_obj = Cmd.Logic (AssumeType (e_loc, ObjectType)) in
+      let assume_int = Cmd.Logic (AssumeType (e_ofs, IntType)) in
+      Cs.unit [ assume_list; assume_obj; assume_int ]
   | Bool ->
-      let v = Ctx.fresh_lv ctx in
-      let assume_bool = Cmd.Logic (AssumeType (v, BooleanType)) in
-      [ assume_bool ]
+      let assume_bool = Cmd.Logic (AssumeType (expr, BooleanType)) in
+      Cs.unit [ assume_bool ]
   | StructTag tag | UnionTag tag | Struct { tag; _ } | Union { tag; _ } ->
       (* TODO: Add a signal here for something unhandled! *)
       let fail =
         assert_unhandled ~feature:CompositNondet [ Lit (String tag) ]
       in
-      [ fail ]
+      Cs.unit [ fail ]
   | _ ->
       let ty_str = GType.show type_ in
       let fail =
         assert_unhandled ~feature:CompositNondet [ Lit (String ty_str) ]
       in
-      [ fail ]
+      Cs.unit [ fail ]
 
 let nondet_expr ~ctx ~add_annot ~type_ () : Val_repr.t Cs.with_body =
   let open Cs.Syntax in
@@ -205,10 +201,10 @@ let nondet_expr ~ctx ~add_annot ~type_ () : Val_repr.t Cs.with_body =
       if Ctx.is_zst_access ctx type_ then
         Cs.return (Val_repr.ByValue (Lit Null))
       else if Ctx.representable_in_store ctx type_ then
-        let* hash_x = Cs.return (Ctx.fresh_lv ctx) in
-        let* () = Cs.unit [ Cmd.Logic (LCmd.SpecVar [ hash_x ]) ] in
-        let+ () = assume_type ~ctx type_ hash_x in
-        Val_repr.ByValue (LVar hash_x)
+        let* fresh = fresh_sv ctx in
+        let fresh = Expr.PVar fresh in
+        let+ () = assume_type ~ctx type_ fresh in
+        Val_repr.ByValue fresh
       else
         let fail_cmd =
           assert_unhandled ~feature:CompositNondet

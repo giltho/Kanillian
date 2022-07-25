@@ -66,11 +66,11 @@ let pp ft t =
 
 let show = Fmt.to_to_string pp
 
-let unhandled ~irep id msg =
+let unhandled ~irep:_ id msg =
   (* TODO: hide the next line behind a config flag *)
-  Fmt.pr "UNHANDLED_IREP: %a\n@?"
-    (Yojson.Safe.pretty_print ~std:true)
-    (Irep.to_yojson irep);
+  (* Fmt.pr "UNHANDLED_IREP: %a\n@?"
+     (Yojson.Safe.pretty_print ~std:true)
+     (Irep.to_yojson irep); *)
   Unhandled (id, msg)
 
 let as_symbol e =

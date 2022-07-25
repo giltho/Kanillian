@@ -22,7 +22,6 @@ module Generators = struct
       ret
 
   let temp_var () = make "temp__"
-  let temp_lvar () = make "#lvar_"
   let label () = make "cc"
 end
 
@@ -65,7 +64,6 @@ type t = {
   machine : Machine_model.t;
   prog : Program.t;
   fresh_v : unit -> string;
-  fresh_lv : unit -> string;
   in_memory : string Hashset.t;
   locals : (string, Local.t) Hashtbl.t;
   allocated_temps : Local.t Hashset.t;
@@ -82,7 +80,6 @@ let make ~machine ~prog ~harness () =
     machine;
     prog;
     fresh_v = (fun () -> failwith "uninitialized var generator");
-    fresh_lv = Generators.temp_lvar ();
     fresh_lab = Generators.label ();
     harness;
     break_lab = None;
@@ -90,7 +87,6 @@ let make ~machine ~prog ~harness () =
 
 let with_new_generators t = { t with fresh_v = Generators.temp_var () }
 let fresh_v t = t.fresh_v ()
-let fresh_lv t = t.fresh_lv ()
 let fresh_lab t = t.fresh_lab ()
 let in_memory t x = Hashset.mem t.in_memory x
 let is_local t x = Hashtbl.mem t.locals x
