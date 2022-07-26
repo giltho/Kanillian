@@ -198,10 +198,19 @@ proc i__cbmc_unsign_int(v1) {
       unde: fail[cast]("Using cast function for long on non-long elements")
 };
 
-proc i__binop_addl(v1, v2) {
+proc i__cbmc_binop_addl(v1, v2) {
         goto [ l-nth(v1, 0i) = "long" ] llon unde;
   llon: goto [ l-nth(v2, 0i) = "long" ] blon unde;
   blon: ret := {{ "long", l-nth(v1, 1i) i+ l-nth(v2, 1i) }};
+        return;
+  unde: ret := undefined;
+        return
+};
+
+proc i__cbmc_binop_mull(v1, v2) {
+        goto [ l-nth(v1, 0i) = "long" ] llon unde;
+  llon: goto [ l-nth(v2, 0i) = "long" ] blon unde;
+  blon: ret := {{ "long", l-nth(v1, 1i) i* l-nth(v2, 1i) }};
         return;
   unde: ret := undefined;
         return

@@ -37,7 +37,9 @@ module Binop_functions = struct
   open Cgil_lib.CConstants.BinOp_Functions
 
   let addl = "i__cbmc_binop_addl"
+  let mull = "i__cbmc_binop_mull"
   let add = add
+  let mul = mul
 end
 
 module Cast_functions = struct

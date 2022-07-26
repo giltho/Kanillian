@@ -45,42 +45,42 @@ let compile_binop
         | CInteger I_bool -> `Proc cmpu_eq
         | CInteger I_size_t -> `Proc cmplu_eq
         | CInteger I_ssize_t -> `Proc cmpl_eq
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Notequal -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_ne
         | CInteger I_bool -> `Proc cmpu_ne
         | CInteger I_size_t -> `Proc cmplu_ne
         | CInteger I_ssize_t -> `Proc cmpl_ne
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Le -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_le
         | CInteger I_bool -> `Proc cmpu_le
         | CInteger I_size_t -> `Proc cmplu_le
         | CInteger I_ssize_t -> `Proc cmpl_le
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Lt -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_lt
         | CInteger I_bool -> `Proc cmpu_lt
         | CInteger I_size_t -> `Proc cmplu_lt
         | CInteger I_ssize_t -> `Proc cmpl_lt
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Gt -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_gt
         | CInteger I_bool -> `Proc cmpu_gt
         | CInteger I_size_t -> `Proc cmplu_gt
         | CInteger I_ssize_t -> `Proc cmpl_gt
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Ge -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_ge
         | CInteger I_bool -> `Proc cmpu_ge
         | CInteger I_size_t -> `Proc cmplu_ge
         | CInteger I_ssize_t -> `Proc cmpl_ge
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
     | Plus -> (
         match (lty, rty) with
         | CInteger I_int, CInteger I_int -> `Proc add
@@ -92,9 +92,16 @@ let compile_binop
         | CInteger (I_size_t | I_ssize_t), Pointer _ ->
             `App (fun num ptr -> Memory.ptr_add_v ptr num)
         | Pointer _, CInteger (I_size_t | I_ssize_t) -> `App Memory.ptr_add_v
-        | _ -> `Unhandled true)
+        | _ -> `Unhandled `With_type)
+    | Mult -> (
+        match (lty, rty) with
+        | CInteger I_int, CInteger I_int -> `Proc mul
+        | CInteger I_char, CInteger I_char -> `Proc mul
+        | CInteger I_size_t, CInteger I_size_t -> `Proc mull
+        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc mull
+        | _ -> `Unhandled `With_type)
     | Or -> `GilBinop BinOp.BOr
-    | _ -> `Unhandled false
+    | _ -> `Unhandled `No_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
@@ -107,8 +114,12 @@ let compile_binop
       Cs.return ~app:[ call ] (Expr.PVar gvar)
   | `App f -> Cs.return (f e1 e2)
   | `GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
-  | `Unhandled with_type ->
-      let type_info = if with_type then Some (lty, rty) else None in
+  | `Unhandled wt ->
+      let type_info =
+        match wt with
+        | `With_type -> Some (lty, rty)
+        | `No_type -> None
+      in
       let cmd =
         Helpers.assert_unhandled ~feature:(BinOp (binop, type_info)) []
       in
@@ -293,9 +304,45 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
               "Dereferencing a composit value, pointers should be passed by \
                value"
         | Procedure _ -> Error.unexpected "Dereferencing a procedure")
-    | Index _ ->
-        let cmd = b (Helpers.assert_unhandled ~feature:ArrayIndex []) in
-        Cs.return ~app:[ cmd ] (dummy_access ~ctx lvalue.type_)
+    | Index { array; index } ->
+        let* index = compile_expr ~ctx index in
+        let index =
+          match index with
+          | ByValue index -> index
+          | _ -> Error.unexpected "Indexing with non-scalar value"
+        in
+        let* lhs_access = as_access array in
+        let ptr =
+          match lhs_access with
+          | InMemoryComposit { ptr; _ } -> ptr
+          | _ -> Error.code_error "Array access is not in-memory-composit"
+        in
+        let sz =
+          let sz_i = Ctx.size_of ctx lvalue.type_ in
+          let ty =
+            let open Cgil_lib.CConstants.VTypes in
+            match Ctx.archi ctx with
+            | `Archi32 -> int_type
+            | `Archi64 -> long_type
+          in
+          Expr.EList [ Lit (String ty); Expr.int sz_i ]
+        in
+        let* offset =
+          let mult =
+            match Ctx.archi ctx with
+            | `Archi32 -> Kconstants.Binop_functions.mul
+            | `Archi64 -> Kconstants.Binop_functions.mull
+          in
+          let res = Ctx.fresh_v ctx in
+          let call =
+            Cmd.Call (res, Lit (String mult), [ index; sz ], None, None)
+          in
+          Cs.return ~app:[ b call ] (Expr.PVar res)
+        in
+        let ptr = Memory.ptr_add_e ptr offset in
+        if Ctx.representable_in_store ctx lvalue.type_ then
+          Cs.return (InMemoryScalar { ptr; loaded = None })
+        else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
     | Member { lhs; field } ->
         let* lhs_access = as_access lhs in
         let ptr, lhs_ty =
@@ -303,10 +350,6 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           | InMemoryComposit { ptr; type_ } -> (ptr, type_)
           | _ -> Error.code_error "Structure access is not in-memory-composit"
         in
-        (* TODO:
-           I have the function to compute the offset in bits,
-           I just need to do the pointer arithmetics and return the right valu
-           either composit or scalar, but in memory in any case *)
         let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
         let ptr = Memory.ptr_add ptr field_offset in
         if Ctx.representable_in_store ctx lvalue.type_ then
