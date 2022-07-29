@@ -107,6 +107,7 @@ let trans_binop_expr ~fname binop te1 te2 =
   | Oxor -> call BinOp_Functions.xor
   (* Int unsgined ops *)
   | Oshru -> call BinOp_Functions.shru
+  | Omodu -> call BinOp_Functions.modu
   (* Long ops *)
   | Oaddl -> call BinOp_Functions.addl
   | Osubl -> call BinOp_Functions.subl
@@ -116,6 +117,7 @@ let trans_binop_expr ~fname binop te1 te2 =
   | Oshll -> call BinOp_Functions.shll
   | Oorl -> call BinOp_Functions.orl
   | Oxorl -> call BinOp_Functions.xorl
+  | Omodl -> call BinOp_Functions.modl
   (* Long unsigned ops *)
   | Odivlu -> call BinOp_Functions.divlu
   | Omodlu -> call BinOp_Functions.modlu
