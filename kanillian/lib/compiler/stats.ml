@@ -16,7 +16,6 @@ end
 module Unhandled = struct
   type feature =
     | CompositNondet
-    | ReturnByCopy
     | CallArgumentByCopy
     | DeclCompositValue
     | ByteExtract
@@ -24,7 +23,6 @@ module Unhandled = struct
     | ArrayConstant
     | StringConstant
     | OutputStmt
-    | ArrayIndex
     | ZstAddress
     | BinOp of Ops.Binary.t * (Type.t * Type.t) option
     | UnOp of Ops.Unary.t
@@ -36,7 +34,6 @@ module Unhandled = struct
 
   let feature_to_string = function
     | CompositNondet -> "CompositNondet"
-    | ReturnByCopy -> "ReturnByCopy"
     | CallArgumentByCopy -> "CallArgumentByCopy"
     | DeclCompositValue -> "DeclCompositValue"
     | ByteExtract -> "ByteExtract"
@@ -44,7 +41,6 @@ module Unhandled = struct
     | ArrayConstant -> "ArrayConstant"
     | StringConstant -> "StringConstant"
     | OutputStmt -> "OutputStmt"
-    | ArrayIndex -> "ArrayIndex"
     | ZstAddress -> "ZstAddress"
     | UnOp unop -> "Unop::" ^ Ops.Unary.show unop
     | BinOp (b, types) -> (
