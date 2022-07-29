@@ -63,6 +63,36 @@ proc i__cbmc_binop_cmpfs_ge(v1, v2) {
   unde: fail[comparison]("Using single comparison operator for non-single elements")
 };
 
+proc i__cbmc_binop_cmpfs_eq(v1, v2) {
+        goto [ l-nth(v1, 0i) = "single" ] llon unde;
+  llon: goto [ l-nth(v2, 0i) = "single" ] blon unde;
+        (* FIXME: We should be using Z3 in float mode, not Real mode *)
+  blon: ret := (l-nth(v1, 1i) = l-nth(v2, 1i));
+        return;
+  unde: fail[comparison]("Using single comparison operator for non-single elements")
+};
+
+proc i__cbmc_binop_cmpfs_ne(v1, v2) {
+      ir := "i__cbmc_binop_cmpfs_eq"(v1, v2);
+      ret := not ir;
+      return
+};
+
+proc i__cbmc_binop_cmpf_eq(v1, v2) {
+        goto [ l-nth(v1, 0i) = "float" ] llon unde;
+  llon: goto [ l-nth(v2, 0i) = "float" ] blon unde;
+        (* FIXME: We should be using Z3 in float mode, not Real mode *)
+  blon: ret := (l-nth(v1, 1i) = l-nth(v2, 1i));
+        return;
+  unde: fail[comparison]("Using float comparison operator for non-float elements")
+};
+
+proc i__cbmc_binop_cmpf_ne(v1, v2) {
+      ir := "i__cbmc_binop_cmpf_eq"(v1, v2);
+      ret := not ir;
+      return
+};
+
 proc i__cbmc_binop_cmpfs_le(v1, v2) {
         goto [ l-nth(v1, 0i) = "single" ] llon unde;
   llon: goto [ l-nth(v2, 0i) = "single" ] blon unde;

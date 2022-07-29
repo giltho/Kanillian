@@ -53,6 +53,16 @@ let compile_binop
         | CInteger I_size_t -> `Proc cmplu_ne
         | CInteger I_ssize_t -> `Proc cmpl_ne
         | _ -> `Unhandled `With_type)
+    | IeeeFloatEqual -> (
+        match lty with
+        | Float -> `Proc cmpfs_eq
+        | Double -> `Proc cmpf_eq
+        | _ -> `Unhandled `With_type)
+    | IeeeFloatNotequal -> (
+        match lty with
+        | Float -> `Proc cmpfs_ne
+        | Double -> `Proc cmpf_ne
+        | _ -> `Unhandled `With_type)
     | Le -> (
         match lty with
         | CInteger (I_int | I_char) -> `Proc cmp_le
