@@ -100,6 +100,16 @@ let compile_binop
         | CInteger I_size_t, CInteger I_size_t -> `Proc mull
         | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc mull
         | _ -> `Unhandled `With_type)
+    | Mod -> (
+        match (lty, rty) with
+        | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
+            `Proc mod_
+        | CInteger I_size_t, CInteger I_size_t -> `Proc modlu
+        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc modl
+        | Unsignedbv { width = width_a }, Unsignedbv { width = width_b }
+          when width_a == width_b
+               && (width_a == 8 || width_a == 16 || width_a == 32) -> `Proc modu
+        | _ -> `Unhandled `With_type)
     | Or -> `GilBinop BinOp.BOr
     | _ -> `Unhandled `No_type
   in
@@ -305,6 +315,9 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
                value"
         | Procedure _ -> Error.unexpected "Dereferencing a procedure")
     | Index { array; index } ->
+        Fmt.pr "!!!\n%a[%a] - array of type %a - index of type %a\n!!!\n@?"
+          GExpr.pp array GExpr.pp index GType.pp array.type_ GType.pp
+          index.type_;
         let* index = compile_expr ~ctx index in
         let index =
           match index with

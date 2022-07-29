@@ -40,6 +40,10 @@ module Binop_functions = struct
   let mull = "i__cbmc_binop_mull"
   let add = add
   let mul = mul
+  let mod_ = mod_
+  let modlu = modlu
+  let modl = modl
+  let modu = modu
 end
 
 module Cast_functions = struct
