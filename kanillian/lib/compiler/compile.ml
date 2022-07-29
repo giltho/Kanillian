@@ -362,7 +362,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
 
-  Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body;
+  (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
   let ctx =
     Ctx.with_entering_body ctx ~params:func.params ~body ~location:func.location
   in

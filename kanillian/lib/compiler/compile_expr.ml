@@ -252,6 +252,10 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
       -> `Proc Kconstants.Cast_functions.unsign_long
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
       -> `Proc Kconstants.Cast_functions.unsign_int
+    | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 64
+      -> `Proc Kconstants.Cast_functions.sign_long
+    | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 32
+      -> `Proc Kconstants.Cast_functions.sign_int
     | Pointer _, Pointer _ -> `Nop
     | _ -> `Unhandled
   in
@@ -315,9 +319,6 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
                value"
         | Procedure _ -> Error.unexpected "Dereferencing a procedure")
     | Index { array; index } ->
-        Fmt.pr "!!!\n%a[%a] - array of type %a - index of type %a\n!!!\n@?"
-          GExpr.pp array GExpr.pp index GType.pp array.type_ GType.pp
-          index.type_;
         let* index = compile_expr ~ctx index in
         let index =
           match index with

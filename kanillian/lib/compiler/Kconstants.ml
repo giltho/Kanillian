@@ -49,6 +49,8 @@ end
 module Cast_functions = struct
   let unsign_int = "i__cbmc_unsign_int"
   let unsign_long = "i__cbmc_unsign_long"
+  let sign_int = "i__cbmc_sign_int"
+  let sign_long = "i__cbmc_sign_long"
 end
 
 module Imports = struct
