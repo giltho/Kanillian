@@ -189,6 +189,7 @@ module Expr : sig
     | Index of { array : t; index : t }
     | StringConstant of string
     | TypeCast of t
+    | If of { cond : t; then_ : t; else_ : t }
     | Nondet
     | Unhandled of Id.t * string
 

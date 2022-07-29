@@ -20,6 +20,7 @@ let () =
 let unexpected s = raise (UnexpectedGoto s)
 let code_error s = raise (Code_error s)
 let user_error s = raise (User_error s)
+let assert_ e m = if not e then code_error m
 
 let rethrow_gerror f =
   try f () with

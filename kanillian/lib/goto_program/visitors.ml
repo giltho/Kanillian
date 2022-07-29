@@ -70,6 +70,10 @@ class ['a] iter =
           self#visit_expr ~ctx array;
           self#visit_expr ~ctx index
       | Member { lhs; _ } -> self#visit_expr ~ctx lhs
+      | If { cond; then_; else_ } ->
+          self#visit_expr ~ctx cond;
+          self#visit_expr ~ctx then_;
+          self#visit_expr ~ctx else_
       | Nondet
       | Symbol _
       | IntConstant _
@@ -277,6 +281,12 @@ class ['a] map =
       | Member { lhs; field } ->
           let new_lhs = self#visit_expr ~ctx lhs in
           if new_lhs == lhs then ev else Member { lhs = new_lhs; field }
+      | If { cond; then_; else_ } ->
+          let new_cond = self#visit_expr ~ctx cond in
+          let new_then = self#visit_expr ~ctx then_ in
+          let new_else = self#visit_expr ~ctx else_ in
+          if new_cond == cond && new_then == then_ && new_else == else_ then ev
+          else If { cond = new_cond; then_ = new_then; else_ = new_else }
       | Nondet
       | Symbol _
       | IntConstant _

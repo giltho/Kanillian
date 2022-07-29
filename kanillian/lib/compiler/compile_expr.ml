@@ -640,6 +640,38 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       |> Cs.map_l b
   | Assign { lhs; rhs } -> compile_assign ~ctx ~lhs ~rhs ~annot:b
   | FunctionCall { func; args } -> compile_call ~ctx ~add_annot:b func args
+  | If { cond; then_; else_ } ->
+      let* cond_e = compile_expr cond in
+      let then_lab = Ctx.fresh_lab ctx in
+      let else_lab = Ctx.fresh_lab ctx in
+      let cond_e = Val_repr.as_value ~msg:"Expr If condition" cond_e in
+      let* () = Cs.unit [ b (GuardedGoto (cond_e, then_lab, else_lab)) ] in
+      let res = Ctx.fresh_v ctx in
+      let end_lab = Ctx.fresh_lab ctx in
+      (* Ok the following is going to be an interesting trick.
+         We assign the expr, even if it's by-copy.
+         We don't copy! So we're kinda hacking inside
+         the type abstraction. *)
+      let* res_then =
+        let res_then =
+          let* t = compile_expr then_ in
+          let* res = Val_repr.copy_into t res |> Cs.map_l b in
+          let cmd = b (Cmd.Goto end_lab) in
+          Cs.return ~app:[ cmd ] res
+        in
+        res_then |> Cs.with_label ~annot:(b ~loop:[]) then_lab
+      in
+      let* res_else =
+        let res_else =
+          let* t = compile_expr else_ in
+          Val_repr.copy_into t res |> Cs.map_l b
+        in
+        res_else |> Cs.with_label ~annot:(b ~loop:[]) else_lab
+      in
+      Error.assert_
+        (Val_repr.equal res_then res_else)
+        "if branche exprs must be equal";
+      Cs.return ~app:[ b ~label:end_lab Skip ] res_then
   | ByteExtract _ -> unhandled ByteExtract
   | Struct _ ->
       unhandled StructConstant

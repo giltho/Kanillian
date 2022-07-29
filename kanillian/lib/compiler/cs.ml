@@ -28,6 +28,7 @@ let many (f : 'a -> ('b, 'c) with_list) (x : 'a list) : ('b list, 'c) with_list
 let return ?(app = []) (x : 'a) : ('a, 'b) with_list = (x, app)
 let unit app = ((), app)
 let map_l f (x, l) = (x, List.map f l)
+let with_label ~annot lab (x, l) = (x, Helpers.set_first_label ~annot lab l)
 
 module Syntax = struct
   let ( let* ) = bind

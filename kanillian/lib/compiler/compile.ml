@@ -32,10 +32,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   let b = Body_item.make ~loc ~id in
   let add_annot x = List.map b x in
   let set_first_label_opt label stmts =
-    match stmts with
-    | [] -> [ b ?label Skip ]
-    | (a, None, cmd) :: r -> (a, label, cmd) :: r
-    | (_, Some _, _) :: _ -> b ?label Skip :: stmts
+    Helpers.set_first_label_opt ~annot:(b ~loop:[]) label stmts
   in
   let set_first_label label stmts = set_first_label_opt (Some label) stmts in
   match stmt.body with
@@ -365,7 +362,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
 
-  (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
+  Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body;
   let ctx =
     Ctx.with_entering_body ctx ~params:func.params ~body ~location:func.location
   in

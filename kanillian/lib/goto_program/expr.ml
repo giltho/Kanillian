@@ -19,6 +19,7 @@ type value =
   | Index of { array : t; index : t }
   | StringConstant of string
   | TypeCast of t
+  | If of { cond : t; then_ : t; else_ : t }
   | Nondet
   | Unhandled of Id.t * string
 
@@ -56,6 +57,8 @@ let pp ft t =
     | BoolConstant b -> pf ft "%b" b
     | AddressOf e -> pf ft "&%a" pp e
     | Dereference e -> pf ft "*%a" pp e
+    | If { cond; then_; else_ } ->
+        pf ft "%a ? %a : %a" pp cond pp then_ pp else_
     | Unhandled (id, msg) -> (
         match msg with
         | "" -> pf ft "UNHANDLED_EXPR(%s)" (Id.to_string id)
@@ -209,6 +212,9 @@ and value_of_irep ~(machine : Machine_model.t) ~(type_ : Type.t) (irep : Irep.t)
   | Typecast ->
       let value = exactly_one ~msg:"Type cast" irep |> of_irep in
       TypeCast value
+  | If ->
+      let cond, then_, else_ = exactly_three ~msg:"If Expr" irep in
+      If { cond = of_irep cond; then_ = of_irep then_; else_ = of_irep else_ }
   | Nondet -> Nondet
   (* A bunch of binary operators now*)
   | And -> lift_binop And
