@@ -73,14 +73,19 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
   | Return e ->
       let e, s =
         match e with
-        | Some e ->
+        | Some e -> (
             let open Cs.Syntax in
             let* e = compile_expr_c e in
-            (* Return_by_copy should copy the value in the last first of the function,
-               which contains the ret value.
-               For now, I don't have that, I need to also change how functions are compiled *)
-            Val_repr.as_value_or_unhandled ~feature:ReturnByCopy e |> Cs.map_l b
-        | None -> (Lit Null, [])
+            match e with
+            | ByValue e -> Cs.return e
+            | Procedure _ -> Error.code_error "Return value is a procedure"
+            | ByCopy { ptr; type_ } ->
+                let dst =
+                  Expr.PVar Kconstants.Kanillian_names.return_by_copy_name
+                in
+                let copy_cmd = Memory.memcpy ~ctx ~type_ ~src:ptr ~dst in
+                Cs.return ~app:[ b copy_cmd ] (Expr.Lit Null))
+        | None -> Cs.return ~app:[] (Expr.Lit Null)
       in
       let variable = Utils.Names.return_variable in
       s @ add_annot [ Assignment (variable, e); ReturnNormal ]
@@ -147,8 +152,8 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
             | Direct x, ByValue v -> [ b (Cmd.Assignment (x, v)) ]
             | InMemoryScalar { ptr; _ }, ByValue v ->
                 [ b (Memory.store_scalar ~ctx ptr v lvalue.type_) ]
-            | InMemoryComposit _, ByCopy _ ->
-                [ b (Helpers.assert_unhandled ~feature:ReturnByCopy []) ]
+            | InMemoryComposit { ptr = dst; type_ }, ByCopy { ptr = src; _ } ->
+                [ b (Memory.memcpy ~ctx ~type_ ~src ~dst) ]
             | _ ->
                 Error.code_error
                   (Fmt.str
@@ -373,6 +378,10 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         | None -> Ctx.fresh_v ctx
         | Some s -> s)
       func.params
+  in
+  let proc_params =
+    if Ctx.representable_in_store ctx func.return_type then proc_params
+    else Kconstants.Kanillian_names.return_by_copy_name :: proc_params
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in

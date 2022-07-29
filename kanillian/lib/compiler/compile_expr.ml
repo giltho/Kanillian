@@ -527,17 +527,8 @@ and compile_assign ~ctx ~annot ~lhs ~rhs =
         if not (GType.equal type_v type_access) then
           Error.unexpected "ByCopy assignment with different types on each side"
         else
-          let temp = Ctx.fresh_v ctx in
-          let size = Ctx.size_of ctx type_access in
-          let memcpy = Cgil_lib.CConstants.Internal_Functions.ef_memcpy in
-          (* TODO: emit a signal that alignment check is not performed correctly *)
           let copy_cmd =
-            Cmd.Call
-              ( temp,
-                Lit (String memcpy),
-                [ Expr.int size; Expr.zero_i; ptr_access; ptr_v ],
-                None,
-                None )
+            Memory.memcpy ~ctx ~type_:type_access ~dst:ptr_access ~src:ptr_v
           in
           [ annot copy_cmd ]
     | _ ->

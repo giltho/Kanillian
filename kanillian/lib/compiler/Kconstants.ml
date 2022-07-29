@@ -3,6 +3,10 @@ module CBMC_names = struct
   let start = "__CPROVER__start"
 end
 
+module Kanillian_names = struct
+  let return_by_copy_name = "i___ret"
+end
+
 module Comp_functions = struct
   let cmpl_le = "i__cbmc_binop_cmpl_le"
   let cmpl_ge = "i__cbmc_binop_cmpl_ge"

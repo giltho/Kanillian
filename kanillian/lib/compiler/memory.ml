@@ -141,3 +141,15 @@ let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
         Cmd.Call (var, Lit (String storev), [ chunk; p; v ], None, None)
       in
       store_cmd
+
+let memcpy ~ctx ~(type_ : GType.t) ~(dst : Expr.t) ~(src : Expr.t) =
+  let temp = Ctx.fresh_v ctx in
+  let size = Ctx.size_of ctx type_ in
+  let memcpy = Cgil_lib.CConstants.Internal_Functions.ef_memcpy in
+  (* TODO: emit a signal that alignment check is not performed correctly *)
+  Cmd.Call
+    ( temp,
+      Lit (String memcpy),
+      [ Expr.int size; Expr.zero_i; dst; src ],
+      None,
+      None )
