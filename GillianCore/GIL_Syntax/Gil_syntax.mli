@@ -671,6 +671,7 @@ module Cmd : sig
     | ReturnNormal  (** Normal return *)
     | ReturnError  (** Error return *)
     | Fail of string * Expr.t list  (** Failure *)
+  [@@deriving eq]
 
   (** Pretty-printer *)
   val pp : pp_label:'a Fmt.t -> Format.formatter -> 'a t -> unit
@@ -904,7 +905,7 @@ end
 
 module Annot : sig
   (** {b GIL annot}. *)
-  type t [@@deriving yojson]
+  type t [@@deriving yojson, eq]
 
   (** make an annotation *)
   val make :

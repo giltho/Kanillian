@@ -4,7 +4,7 @@ type t = {
   origin_id : int option;  (** Origin Id, that should be abstracted away *)
   loop_info : string list;
 }
-[@@deriving yojson]
+[@@deriving yojson, eq]
 
 (**/**)
 

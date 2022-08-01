@@ -29,6 +29,7 @@ type 'label t = 'label TypeDef__.cmd =
   | ReturnError  (** Error return        *)
   | Fail of string * Expr.t list  (** Failure             *)
 
+let equal = TypeDef__.equal_cmd
 let fold = List.fold_left SS.union SS.empty
 
 let pvars (cmd : 'label t) : SS.t =
