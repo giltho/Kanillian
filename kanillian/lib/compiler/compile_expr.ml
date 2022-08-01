@@ -733,6 +733,38 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       in
       let writes = writes 0 fields elems in
       Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes })
-  | Array _ -> unhandled ArrayConstant
-  | StringConstant _ -> unhandled StringConstant
+  | Array elems ->
+      let elem_type =
+        match expr.type_ with
+        | Array (elem_type, _) -> elem_type
+        | _ -> Error.unexpected "Array is not of Array type"
+      in
+      let elem_size = Ctx.size_of ctx elem_type in
+      let rec writes count elems () =
+        match elems with
+        | [] -> Seq.Nil
+        | v :: elems ->
+            Cons
+              ( ( count * elem_size,
+                  Val_repr.V { type_ = elem_type; value = compile_expr v } ),
+                writes (count + 1) elems )
+      in
+      let writes = writes 0 elems in
+      Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes })
+  | StringConstant str ->
+      let char_type = GType.CInteger I_char in
+      (* Size could be different from 1 n some architecture,
+         might as well anticipate here *)
+      let char_size = Ctx.size_of ctx char_type in
+      let writes =
+        String.to_seq str
+        |> Seq.mapi (fun i b ->
+               ( i * char_size,
+                 Val_repr.V
+                   {
+                     type_ = char_type;
+                     value = (Val_repr.ByValue (Expr.int (Char.code b)), []);
+                   } ))
+      in
+      Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes })
   | Unhandled (id, msg) -> unhandled (ExprIrep (id, msg))

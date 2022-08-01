@@ -19,8 +19,6 @@ module Unhandled = struct
     | CompositNondet
     | CallArgumentByCopy
     | ByteExtract
-    | ArrayConstant
-    | StringConstant
     | OutputStmt
     | ZstAddress
     | ConstantLValue of string
@@ -38,8 +36,6 @@ module Unhandled = struct
     | CompositNondet -> "CompositNondet"
     | CallArgumentByCopy -> "CallArgumentByCopy"
     | ByteExtract -> "ByteExtract"
-    | ArrayConstant -> "ArrayConstant"
-    | StringConstant -> "StringConstant"
     | OutputStmt -> "OutputStmt"
     | ZstAddress -> "ZstAddress"
     | ConstantLValue s -> "ConstantLValue::" ^ s
