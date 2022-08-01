@@ -122,6 +122,13 @@ proc i__cbmc_binop_cmplu_le(v1, v2) {
   unde: fail[comparison]("Cannot compare non-comparable values")
 };
 
+proc i__cbmc_binop_cmplu_lt(v1, v2) {
+        goto [ (l-nth(v1, 0i) = "long") and (l-nth(v2, 0i) = "long") ] blon unde;
+  blon: ret := (l-nth(v1, 1i) i< l-nth(v2, 1i));
+        return;
+  unde: fail[comparison]("Cannot compare non-comparable values")
+};
+
 proc i__cbmc_binop_cmplu_gt(v1, v2) {
       ir := "i__cbmc_binop_cmplu_le"(v1, v2);
       ret := not ir;

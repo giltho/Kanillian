@@ -376,7 +376,7 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           let call =
             Cmd.Call (res, Lit (String mult), [ index; sz ], None, None)
           in
-          Cs.return ~app:[ b call ] (Expr.PVar res)
+          Cs.return ~app:[ b call ] (Expr.list_nth (Expr.PVar res) 1)
         in
         let ptr = Memory.ptr_add_e ptr offset in
         if Ctx.representable_in_store ctx lvalue.type_ then
