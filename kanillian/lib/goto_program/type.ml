@@ -144,8 +144,8 @@ and param_of_irep ~machine irep =
 
 and datatype_component_of_irep ~machine irep : Datatype_component.t =
   let is_padding =
-    match irep $? CIsPadding |> Option.map (fun x -> x.Irep.id) with
-    | Some Id1 -> true
+    match irep $? CIsPadding with
+    | Some { id = Id1; _ } -> true
     | _ -> false
   in
   if is_padding then

@@ -1,8 +1,10 @@
 (** Compilation state, a simple state monad that simplifying code *)
 
-type ('a, 'b) with_list = 'a * 'b list
+type ('a, 'b) with_list = 'a * 'b list [@@deriving eq]
 type 'a with_cmds = ('a, string Gil_syntax.Cmd.t) with_list
-type 'a with_body = ('a, Body_item.t) with_list
+type 'a with_body = ('a, Body_item.t) with_list [@@deriving eq]
+
+let pp_with_body pp = Fmt.Dump.pair pp (Fmt.Dump.list Body_item.pp)
 
 (* Slightly optimising here, quite often we're gonna add "nothing", so we might as well
    not be in O(size(l1)) *)

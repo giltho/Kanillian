@@ -292,6 +292,20 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
     in
     let as_access = lvalue_as_access ~ctx ~read in
     match lvalue.value with
+    | Struct _ ->
+        let cmd = b (assert_unhandled ~feature:(ConstantLValue "Struct") []) in
+        Cs.return ~app:[ cmd ]
+          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
+    | Array _ ->
+        let cmd = b (assert_unhandled ~feature:(ConstantLValue "Array") []) in
+        Cs.return ~app:[ cmd ]
+          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
+    | StringConstant _ ->
+        let cmd =
+          b (assert_unhandled ~feature:(ConstantLValue "StringConstant") [])
+        in
+        Cs.return ~app:[ cmd ]
+          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
     | Symbol x ->
         if Ctx.is_local ctx x then
           if not (Ctx.representable_in_store ctx lvalue.type_) then
@@ -323,10 +337,8 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
               let+ v = Memory.load_scalar ~ctx ge e.type_ |> Cs.map_l b in
               InMemoryScalar { ptr = ge; loaded = Some (PVar v) }
             else Cs.return (InMemoryScalar { ptr = ge; loaded = None })
-        | ByCopy _ ->
-            Error.unexpected
-              "Dereferencing a composit value, pointers should be passed by \
-               value"
+        | ByCopy _ | ByCompositValue _ ->
+            Error.unexpected "Pointers should be scalars passed by value"
         | Procedure _ -> Error.unexpected "Dereferencing a procedure")
     | Index { array; index } ->
         let* index = compile_expr ~ctx index in
@@ -336,9 +348,12 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           | _ -> Error.unexpected "Indexing with non-scalar value"
         in
         let* lhs_access = as_access array in
-        let ptr =
+        let* ptr =
           match lhs_access with
-          | InMemoryComposit { ptr; _ } -> ptr
+          | InMemoryComposit { ptr; _ } -> Cs.return ptr
+          | ZST ->
+              let cmd = b (assert_unhandled ~feature:FlexibleArrayMember []) in
+              Cs.return ~app:[ cmd ] (Expr.Lit Nono)
           | _ -> Error.code_error "Array access is not in-memory-composit"
         in
         let sz =
@@ -531,6 +546,8 @@ and compile_assign ~ctx ~annot ~lhs ~rhs =
             Memory.memcpy ~ctx ~type_:type_access ~dst:ptr_access ~src:ptr_v
           in
           [ annot copy_cmd ]
+    | InMemoryComposit { ptr = dst; _ }, ByCompositValue { writes; _ } ->
+        Memory.write_composit ~ctx ~annot ~dst writes
     | _ ->
         Error.code_error
           (Fmt.str
@@ -688,9 +705,34 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         "if branche exprs must be equal";
       Cs.return ~app:[ b ~label:end_lab Skip ] res_then
   | ByteExtract _ -> unhandled ByteExtract
-  | Struct _ ->
-      unhandled StructConstant
-      (* Alright that's next. Probably, in this case, it's something like "ByCompositValue, with a bunch of write operations and offsets"*)
+  | Struct elems ->
+      let fields = Ctx.resolve_struct_components ctx expr.type_ in
+      (* We start by getting the offsets where we need to write,
+         we do that on the type. *)
+      let rec writes curr fields elems () =
+        match (fields, elems) with
+        | [], [] -> Seq.Nil
+        | Datatype_component.Padding { bits; _ } :: fields, _ :: elems
+        (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
+          ->
+            let width = bits / 8 in
+            Cons
+              ( (curr, Val_repr.Poison { width }),
+                writes (curr + width) fields elems )
+        | Field { type_; _ } :: fields, _ :: elems
+          when Ctx.is_zst_access ctx type_ ->
+            (* If the field is a ZST, we simply ignore it *)
+            writes (curr + Ctx.size_of ctx type_) fields elems ()
+        | Field { type_; _ } :: fields, v :: elems ->
+            Cons
+              ( (curr, Val_repr.V { type_; value = compile_expr v }),
+                writes (curr + Ctx.size_of ctx type_) fields elems )
+        | _ ->
+            Error.unexpected
+              "Struct type fields not maching struct constant fields"
+      in
+      let writes = writes 0 fields elems in
+      Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes })
   | Array _ -> unhandled ArrayConstant
   | StringConstant _ -> unhandled StringConstant
   | Unhandled (id, msg) -> unhandled (ExprIrep (id, msg))

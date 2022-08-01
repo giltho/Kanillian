@@ -153,3 +153,43 @@ let memcpy ~ctx ~(type_ : GType.t) ~(dst : Expr.t) ~(src : Expr.t) =
       [ Expr.int size; Expr.zero_i; dst; src ],
       None,
       None )
+
+(* let write_composit
+     ~ctx
+     ~(type_ : GType.t)
+     ~(dst : Expr.t)
+     (writes : (int * Val_repr.t Cs.with_cmds) Seq.t) : string Cmd.t list =
+   [] *)
+
+let write_composit
+    ~ctx
+    ~annot
+    ~dst
+    (writes : (int * Val_repr.composit_write) Seq.t) =
+  let loc = Expr.list_nth dst 0 in
+  let base_ofs = Expr.list_nth dst 1 in
+  let at_ofs i = Expr.EList [ loc; Expr.Infix.( + ) base_ofs (Expr.int i) ] in
+  let rec aux start_ofs writes =
+    match writes () with
+    | Seq.Nil -> []
+    | Cons ((_, Val_repr.Poison _), rest) ->
+        (* TODO: Once poison is implemented in Gillian-C,
+           a poison write should actively poison memory.
+           Maybe Poison should directly be a variant of Val_repr, but maybe not.
+           To be understood *)
+        aux start_ofs rest
+    | Cons ((i, V { type_ = ty; value = v, body }), rest) ->
+        let curr_ofs = start_ofs + i in
+        let dst = at_ofs curr_ofs in
+        let cmds =
+          match v with
+          | Val_repr.ByCopy { ptr = src; type_ } ->
+              [ annot (memcpy ~ctx ~dst ~src ~type_) ]
+          | Val_repr.ByValue e -> [ annot (store_scalar ~ctx dst e ty) ]
+          | Val_repr.ByCompositValue { writes; _ } -> aux curr_ofs writes
+          | Val_repr.Procedure _ ->
+              Error.code_error "Writing a procedure in a composit"
+        in
+        body @ cmds @ aux start_ofs rest
+  in
+  aux 0 writes

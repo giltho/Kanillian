@@ -78,20 +78,30 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
             let* e = compile_expr_c e in
             match e with
             | ByValue e -> Cs.return e
-            | Procedure _ -> Error.code_error "Return value is a procedure"
             | ByCopy { ptr; type_ } ->
                 let dst =
                   Expr.PVar Kconstants.Kanillian_names.return_by_copy_name
                 in
                 let copy_cmd = Memory.memcpy ~ctx ~type_ ~src:ptr ~dst in
-                Cs.return ~app:[ b copy_cmd ] (Expr.Lit Null))
-        | None -> Cs.return ~app:[] (Expr.Lit Null)
+                Cs.return ~app:[ b copy_cmd ] (Expr.Lit Undefined)
+            | ByCompositValue { writes; _ } ->
+                let dst =
+                  Expr.PVar Kconstants.Kanillian_names.return_by_copy_name
+                in
+                let cmds = Memory.write_composit ~ctx ~annot:b ~dst writes in
+                Cs.return ~app:cmds (Expr.Lit Undefined)
+            | Procedure _ -> Error.code_error "Return value is a procedure")
+        | None -> Cs.return ~app:[] (Expr.Lit Undefined)
       in
       let variable = Utils.Names.return_variable in
       s @ add_annot [ Assignment (variable, e); ReturnNormal ]
-  | Decl { lhs; value } ->
-      let ty = lhs.type_ in
-      let lhs = GExpr.as_symbol lhs in
+  | Decl { lhs = glhs; value } ->
+      (* TODO:
+         I have too many if/elses for deciding how things should be done,
+         and that's all over the compiler. I should probably have a variant
+         and a unique decision procedure for that. *)
+      let ty = glhs.type_ in
+      let lhs = GExpr.as_symbol glhs in
       (* ZSTs are just (GIL) Null values *)
       if Ctx.is_zst_access ctx ty then
         let cmd = Cmd.Assignment (lhs, Lit Null) in
@@ -102,7 +112,16 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         let write =
           match value with
           | None -> []
-          | Some _ -> [ b (assert_unhandled ~feature:DeclCompositValue []) ]
+          | Some gv -> (
+              let v, cmds = compile_expr_c gv in
+              match v with
+              | Val_repr.ByCompositValue { writes; _ } ->
+                  cmds @ Memory.write_composit ~ctx ~annot:b ~dst:ptr writes
+              | Val_repr.ByCopy { type_; ptr = src } ->
+                  [ b (Memory.memcpy ~ctx ~type_ ~dst:ptr ~src) ]
+              | _ ->
+                  Error.code_error
+                    "Declaring composit value, not writing a composit")
         in
         [ b alloc_cmd; b assign ] @ write
       else if Ctx.in_memory ctx lhs then
@@ -278,16 +297,16 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
       | None -> []
       | Some e ->
           let v, v_init_cmds = compile_expr ~ctx e in
-          let v, as_value_cmds =
-            Val_repr.as_value_or_unhandled ~feature:DeclCompositValue v
-            |> Cs.map_l b
-          in
+          let dst = Expr.EList [ loc; Expr.zero_i ] in
           let store_value =
-            Memory.store_scalar ~ctx ~var:"u"
-              (Expr.EList [ loc; Expr.zero_i ])
-              v gv.type_
+            match v with
+            | ByValue v ->
+                [ b (Memory.store_scalar ~ctx ~var:"u" dst v gv.type_) ]
+            | ByCompositValue { writes; _ } ->
+                Memory.write_composit ~ctx ~annot:b ~dst writes
+            | _ -> Error.unexpected "compile_global_var: not by value"
           in
-          v_init_cmds @ as_value_cmds @ [ b store_value ]
+          v_init_cmds @ store_value
     in
     let drom_perm_cmd =
       let drom_perm = Cgil_lib.LActions.(str_ac (AMem DropPerm)) in
@@ -349,6 +368,21 @@ let compile_free_locals (ctx : Ctx.t) =
   |> Seq.map (Memory.dealloc_local ~ctx)
   |> List.of_seq
 
+let compile_alloc_params ~ctx params =
+  List.concat_map
+    (fun (param, type_) ->
+      if
+        (not (Ctx.is_zst_access ctx type_))
+        && Ctx.representable_in_store ctx type_
+        && Ctx.in_memory ctx param
+      then
+        let ptr, cmda = Memory.alloc_ptr ~ctx type_ in
+        let cmdb = Memory.store_scalar ~ctx ptr (PVar param) type_ in
+        let cmdc = Cmd.Assignment (param, ptr) in
+        [ cmda; cmdb; cmdc ]
+      else [])
+    params
+
 let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let f_loc = Body_item.compile_location func.location in
   let body =
@@ -375,26 +409,29 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
     List.map
       (fun x ->
         match x.Param.identifier with
-        | None -> Ctx.fresh_v ctx
-        | Some s -> s)
+        | None -> (Ctx.fresh_v ctx, x.type_)
+        | Some s -> (s, x.type_))
       func.params
-  in
-  let proc_params =
-    if Ctx.representable_in_store ctx func.return_type then proc_params
-    else Kconstants.Kanillian_names.return_by_copy_name :: proc_params
   in
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
   (* We add a return undef in case the function has no return *)
+  let b = Body_item.make ~loc:f_loc in
   let return_undef =
-    let b = Body_item.make ~loc:f_loc in
     [
       b (Assignment (Kutils.Names.return_variable, Lit Undefined));
       b ReturnNormal;
     ]
   in
+  let alloc_params = compile_alloc_params ~ctx proc_params |> List.map b in
   let proc_body =
-    Array.of_list (compile_statement ~ctx body @ free_locals @ return_undef)
+    Array.of_list
+      (alloc_params @ compile_statement ~ctx body @ free_locals @ return_undef)
+  in
+  let proc_params =
+    let identifiers = List.map fst proc_params in
+    if Ctx.representable_in_store ctx func.return_type then identifiers
+    else Kconstants.Kanillian_names.return_by_copy_name :: identifiers
   in
   Proc.
     {

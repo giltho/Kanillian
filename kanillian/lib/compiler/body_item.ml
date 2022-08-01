@@ -1,6 +1,11 @@
 open Gil_syntax
 
-type t = Annot.t * string option * string Cmd.t
+type t = Annot.t * string option * string Cmd.t [@@deriving eq]
+
+let pp ft t =
+  let _, lab, cmd = t in
+  Option.iter (fun l -> Fmt.pf ft "%s: " l) lab;
+  Cmd.pp_labeled ft cmd
 
 let compile_location (loc : Goto_lib.Location.t) =
   match loc.source with

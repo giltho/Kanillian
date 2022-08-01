@@ -15,15 +15,16 @@ end
 
 module Unhandled = struct
   type feature =
+    | ByCompositValueCopyInto
     | CompositNondet
     | CallArgumentByCopy
-    | DeclCompositValue
     | ByteExtract
-    | StructConstant
     | ArrayConstant
     | StringConstant
     | OutputStmt
     | ZstAddress
+    | ConstantLValue of string
+    | FlexibleArrayMember
     | BinOp of Ops.Binary.t * (Type.t * Type.t) option
     | UnOp of Ops.Unary.t
     | LoadScalar of Type.t
@@ -33,15 +34,16 @@ module Unhandled = struct
     | StmtIrep of Irep_lib.Id.t
 
   let feature_to_string = function
+    | ByCompositValueCopyInto -> "ByCompositValueCopyInto"
     | CompositNondet -> "CompositNondet"
     | CallArgumentByCopy -> "CallArgumentByCopy"
-    | DeclCompositValue -> "DeclCompositValue"
     | ByteExtract -> "ByteExtract"
-    | StructConstant -> "StructConstant"
     | ArrayConstant -> "ArrayConstant"
     | StringConstant -> "StringConstant"
     | OutputStmt -> "OutputStmt"
     | ZstAddress -> "ZstAddress"
+    | ConstantLValue s -> "ConstantLValue::" ^ s
+    | FlexibleArrayMember -> "FlexibleArrayMember"
     | UnOp unop -> "Unop::" ^ Ops.Unary.show unop
     | BinOp (b, types) -> (
         "Binop::" ^ Ops.Binary.show b

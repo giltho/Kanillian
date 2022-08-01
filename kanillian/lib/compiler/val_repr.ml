@@ -2,9 +2,25 @@ open Helpers
 open Gil_syntax
 module GType = Goto_lib.Type
 
-type t =
+(* Tiny hack for derive to work *)
+module Seq = struct
+  include Seq
+
+  let pp ft t = (Fmt.iter ~sep:Fmt.comma Seq.iter) ft t
+end
+
+type composit_write =
+  | V of { type_ : GType.t; value : t Cs.with_body }
+  | Poison of { width : int }
+
+and t =
   | ByCopy of { ptr : Expr.t; type_ : GType.t }
   | ByValue of Expr.t
+  | ByCompositValue of {
+      type_ : GType.t;
+      writes : (int * composit_write) Seq.t;
+          (** List of offsets and what to write there *)
+    }
   | Procedure of Expr.t
 [@@deriving show { with_path = false }, eq]
 
@@ -46,3 +62,6 @@ let copy_into (v : t) (x : string) : t Cs.with_cmds =
   | ByCopy { ptr; type_ } ->
       let cmd = Cmd.Assignment (x, ptr) in
       Cs.return ~app:[ cmd ] (ByCopy { ptr = PVar x; type_ })
+  | ByCompositValue { type_; _ } ->
+      let cmd = assert_unhandled ~feature:ByCompositValueCopyInto [] in
+      Cs.return ~app:[ cmd ] (ByCopy { ptr = Expr.Lit Nono; type_ })

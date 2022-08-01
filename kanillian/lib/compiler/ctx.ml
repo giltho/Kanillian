@@ -95,6 +95,13 @@ let register_allocated_temp ctx ~name:symbol ~type_ ~location =
   let local = Local.{ symbol; type_; location } in
   Hashset.add ctx.allocated_temps local
 
+let rec resolve_struct_components ctx (ty : Type.t) =
+  let tag_lookup x = Hashtbl.find ctx.prog.types x in
+  match ty with
+  | Struct { components; _ } -> components
+  | StructTag x -> resolve_struct_components ctx (tag_lookup x)
+  | _ -> Error.code_error "resolve_struct_components for non-struct"
+
 let size_of ctx ty =
   Error.rethrow_gerror (fun () ->
       let tag_lookup x = Hashtbl.find ctx.prog.types x in
