@@ -16,14 +16,6 @@ proc i__malloc(vsz) {
       return
 };
 
-proc i__init_to_zero(b, curr, max) {
-           goto [curr = max] end ctn;
-      ctn: u := [mem_store] ("int8unsigned", b, curr, {{ "int", 0i }});
-           u := "i__init_to_zero"(b, curr i+ 1i, max);
-      end: ret := undefined;
-           return
-};
-
 proc i__free(ptr) {
          vszl := [mem_load]("int64", l-nth(ptr, 0i), l-nth(ptr, 1i) i- 8i); (* 8 is size_chunk of "int64" *)
          sz := "i__alloc_size"(l-nth(vszl, 0i));
