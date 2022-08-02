@@ -5,6 +5,7 @@ end
 
 module Kanillian_names = struct
   let return_by_copy_name = "i___ret"
+  let ret_label = "ret"
 end
 
 module Comp_functions = struct

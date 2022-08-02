@@ -94,7 +94,11 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
         | None -> Cs.return ~app:[] (Expr.Lit Undefined)
       in
       let variable = Utils.Names.return_variable in
-      s @ add_annot [ Assignment (variable, e); ReturnNormal ]
+      s
+      @ add_annot
+          [
+            Assignment (variable, e); Goto Kconstants.Kanillian_names.ret_label;
+          ]
   | Decl { lhs = glhs; value } ->
       (* TODO:
          I have too many if/elses for deciding how things should be done,
@@ -118,7 +122,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
               | Val_repr.ByCompositValue { writes; _ } ->
                   cmds @ Memory.write_composit ~ctx ~annot:b ~dst:ptr writes
               | Val_repr.ByCopy { type_; ptr = src } ->
-                  [ b (Memory.memcpy ~ctx ~type_ ~dst:ptr ~src) ]
+                  cmds @ [ b (Memory.memcpy ~ctx ~type_ ~dst:ptr ~src) ]
               | _ ->
                   Error.code_error
                     "Declaring composit value, not writing a composit")
@@ -380,6 +384,12 @@ let compile_alloc_params ~ctx params =
         let cmdb = Memory.store_scalar ~ctx ptr (PVar param) type_ in
         let cmdc = Cmd.Assignment (param, ptr) in
         [ cmda; cmdb; cmdc ]
+      else if not (Ctx.representable_in_store ctx type_) then
+        (* Passing a structure to the function. In that case, we copy it. *)
+        let dst, cmda = Memory.alloc_ptr ~ctx type_ in
+        let cmdb = Memory.memcpy ~ctx ~dst ~src:(PVar param) ~type_ in
+        let cmdc = Cmd.Assignment (param, dst) in
+        [ cmda; cmdb; cmdc ]
       else [])
     params
 
@@ -401,7 +411,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
         Stmt.{ location = func.location; body = Return (Some nondet) }
   in
 
-  (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
+  Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body;
   let ctx =
     Ctx.with_entering_body ctx ~params:func.params ~body ~location:func.location
   in
@@ -416,17 +426,20 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let proc_spec = None in
   let free_locals = compile_free_locals ctx in
   (* We add a return undef in case the function has no return *)
-  let b = Body_item.make ~loc:f_loc in
+  let b = Body_item.make_hloc ~loc:func.location in
   let return_undef =
-    [
-      b (Assignment (Kutils.Names.return_variable, Lit Undefined));
-      b ReturnNormal;
-    ]
+    b (Assignment (Kutils.Names.return_variable, Lit Undefined))
+  in
+  let return_block =
+    set_first_label ~annot:(b ~loop:[]) Kconstants.Kanillian_names.ret_label
+      (free_locals @ [ b ReturnNormal ])
   in
   let alloc_params = compile_alloc_params ~ctx proc_params |> List.map b in
   let proc_body =
     Array.of_list
-      (alloc_params @ compile_statement ~ctx body @ free_locals @ return_undef)
+      (alloc_params
+      @ compile_statement ~ctx body
+      @ [ return_undef ] @ return_block)
   in
   let proc_params =
     let identifiers = List.map fst proc_params in

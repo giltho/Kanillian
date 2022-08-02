@@ -618,12 +618,26 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         | _ ->
             Error.code_error "function call of something that isn't a procedure"
       in
-      let* args = Cs.many (compile_expr ~ctx) args in
       let* args =
         Cs.many
-          (Val_repr.as_value_or_unhandled ~feature:CallArgumentByCopy)
+          (fun arg ->
+            let* c_arg = compile_expr ~ctx arg in
+            match c_arg with
+            | Val_repr.ByValue e -> Cs.return e
+            | ByCopy { ptr; _ } ->
+                (* When passing by copy, we trust the receiving function to copy the value when it receives it. *)
+                Cs.return ptr
+            | ByCompositValue { writes; type_ } ->
+                let* temp =
+                  Memory.alloc_temp ~ctx ~location:arg.location type_
+                  |> Cs.map_l b
+                in
+                let+ () =
+                  Cs.unit (Memory.write_composit ~ctx ~annot:b ~dst:temp writes)
+                in
+                temp
+            | Procedure _ -> Error.unexpected "passing a procedure as argument")
           args
-        |> Cs.map_l b
       in
       (* If the return value has to be passed by copy,
          we add an argument before every other in which the return value will be stored.
@@ -633,6 +647,8 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         let gil_call = Cmd.Call (ret_var, fname, args, None, None) in
         by_value ~app:[ b gil_call ] (Expr.PVar ret_var)
       else
+        (* If the function returns by copy, we add first parameter
+           that will contain the result. *)
         let* temp_arg =
           Memory.alloc_temp ~ctx ~location return_type |> Cs.map_l b
         in
