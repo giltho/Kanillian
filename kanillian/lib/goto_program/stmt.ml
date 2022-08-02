@@ -8,6 +8,7 @@ type body =
   | Goto of string
   | FunctionCall of { lhs : Expr.t option; func : Expr.t; args : Expr.t list }
   | Switch of { control : Expr.t; cases : switch_case list; default : t option }
+  | Ifthenelse of { guard : Expr.t; then_ : t; else_ : t option }
   | Break
   | Skip
   | Expression of Expr.t
@@ -59,6 +60,9 @@ let rec pp ft (t : t) =
       pf ft "@[<v 3>output (%a, %a);@]" Expr.pp msg Expr.pp value
   | Switch _ -> pf ft "switch"
   | Break -> pf ft "break"
+  | Ifthenelse { guard; then_; else_ } ->
+      pf ft "@[<v 3>if %a then{@\n %a } else {@\n%a;@]}" Expr.pp guard pp then_
+        (option pp) else_
   | Unhandled id -> pf ft "UNHANDLED_STMT(%s)" (Id.to_string id)
 
 (** Lifting from Irep *)
@@ -141,6 +145,15 @@ let rec body_of_irep ~(machine : Machine_model.t) (irep : Irep.t) : body =
       let value = expr_of_irep value in
       Output { msg; value }
   | Break -> Break
+  | Ifthenelse ->
+      let guard, then_, else_ =
+        match irep.sub with
+        | [ a; b; c ] ->
+            (expr_of_irep a, of_irep b, Lift_utils.lift_option of_irep c)
+        | [ a; b ] -> (expr_of_irep a, of_irep b, None)
+        | _ -> unexpected "Invalid if-then-else statement"
+      in
+      Ifthenelse { guard; then_; else_ }
   | id -> unhandled ~irep id
 
 and switch_cases_of_irep ~machine l =

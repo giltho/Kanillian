@@ -217,6 +217,7 @@ module Stmt : sig
         cases : switch_case list;
         default : t option;
       }
+    | Ifthenelse of { guard : Expr.t; then_ : t; else_ : t option }
     | Break
     | Skip
     | Expression of Expr.t

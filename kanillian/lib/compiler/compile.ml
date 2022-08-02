@@ -228,6 +228,23 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       in
       let end_ = [ b ~label:end_lab Skip ] in
       control_s @ compiled_cases @ default_block @ end_
+  | Ifthenelse { guard; then_; else_ } ->
+      let comp_guard, cmd_guard = compile_expr_c guard in
+      let comp_guard = Val_repr.as_value ~msg:"ifthenelse guard" comp_guard in
+      let comp_then_ = compile_statement_c then_ in
+      let comp_else = Option.map compile_statement_c else_ in
+      let end_lab = Ctx.fresh_lab ctx in
+      let then_lab, comp_then_ =
+        Body_item.get_or_set_fresh_lab ~ctx comp_then_
+      in
+      let else_lab, comp_else =
+        match comp_else with
+        | None -> (end_lab, [])
+        | Some else_ -> Body_item.get_or_set_fresh_lab ~ctx else_
+      in
+      let goto_guard = b (Cmd.GuardedGoto (comp_guard, then_lab, else_lab)) in
+      let end_ = [ b ~label:end_lab Skip ] in
+      cmd_guard @ [ goto_guard ] @ comp_then_ @ comp_else @ end_
   | Break -> (
       match ctx.break_lab with
       | None -> Error.unexpected "Break call outside of loop of switch"
@@ -257,7 +274,13 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
     @@ Cmd.LAction
          ("u", drom_perm, [ loc; Expr.zero_i; Expr.int 1; perm_string ])
   in
-  let symexpr = Expr.Lit (String fn.symbol) in
+  let symexpr = Expr.string fn.symbol in
+  let target =
+    match Kconstants.hook fn.symbol with
+    | Some f -> f
+    | None -> fn.symbol
+  in
+  let target = Expr.string target in
   let set_symbol_cmd =
     let set_symbol = Cgil_lib.LActions.(str_ac (AGEnv SetSymbol)) in
     b @@ Cmd.LAction ("u", set_symbol, [ symexpr; loc ])
@@ -266,7 +289,7 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
     let set_def = Cgil_lib.LActions.(str_ac (AGEnv SetDef)) in
     b
     @@ Cmd.LAction
-         ("u", set_def, [ loc; EList [ Lit (String "function"); symexpr ] ])
+         ("u", set_def, [ loc; EList [ Lit (String "function"); target ] ])
   in
   List.to_seq
     [ alloc_cmd; assign_cmd; drop_perm_cmd; set_symbol_cmd; set_def_cmd ]
@@ -484,7 +507,11 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   let gil_prog = Prog.create () in
   let gil_prog =
     Program.fold_functions
-      (fun _ f prog -> Prog.add_proc prog (compile_function ~ctx:context f))
+      (fun _ f prog ->
+        (* Only compile the function if it isn't hooked *)
+        if Option.is_none (Kconstants.hook f.symbol) then
+          Prog.add_proc prog (compile_function ~ctx:context f)
+        else prog)
       program gil_prog
   in
   let gil_prog = Prog.add_proc gil_prog (set_global_env_proc context) in

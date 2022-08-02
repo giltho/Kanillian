@@ -121,6 +121,15 @@ let compile_binop
                && (width_a == 8 || width_a == 16 || width_a == 32) -> `Proc modu
         | _ -> `Unhandled `With_type)
     | Or -> `GilBinop BinOp.BOr
+    | OverflowPlus -> (
+        match (lty, rty) with
+        | CInteger I_size_t, CInteger I_size_t
+          when match Ctx.archi ctx with
+               | `Archi64 -> true
+               | _ -> false -> `Proc overflow_plus_u64
+        | Unsignedbv { width = 64 }, Unsignedbv { width = 64 } ->
+            `Proc overflow_plus_u64
+        | _ -> `Unhandled `With_type)
     | _ -> `Unhandled `No_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
@@ -243,7 +252,7 @@ let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
   let open Cs.Syntax in
   let is_symbolic_exec =
     let open Gillian.Utils in
-    ExecMode.symbolic_exec !Config.current_exec_mode
+    ExecMode.is_symbolic_exec !Config.current_exec_mode
   in
   if not is_symbolic_exec then
     Error.user_error
@@ -372,6 +381,10 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     | CInteger I_int, CInteger (I_size_t | I_ssize_t) ->
         assert (ctx.machine.pointer_width == 64);
         `Proc Cgil_lib.CConstants.UnOp_Functions.longofint
+    | Unsignedbv { width = 32 }, CInteger I_ssize_t -> (
+        match Ctx.archi ctx with
+        | `Archi32 -> `Proc Kconstants.Cast_functions.unsign_int
+        | `Archi64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
     | CInteger I_int, Unsignedbv { width } when ctx.machine.int_width == width
       -> `Proc Kconstants.Cast_functions.unsign_int
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 64
@@ -614,6 +627,10 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
       let* e = compile_expr ~ctx func in
       let fname =
         match e with
+        | Procedure (Lit (String f) as fname) -> (
+            match Kconstants.hook f with
+            | Some fname -> Expr.string fname
+            | _ -> fname)
         | Procedure e -> e
         | _ ->
             Error.code_error "function call of something that isn't a procedure"

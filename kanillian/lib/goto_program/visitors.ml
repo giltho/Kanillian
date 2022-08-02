@@ -114,6 +114,10 @@ class ['a] iter =
               self#visit_stmt ~ctx sw_body)
             cases;
           Option.iter (self#visit_stmt ~ctx) default
+      | Ifthenelse { guard; then_; else_ } ->
+          self#visit_expr ~ctx guard;
+          self#visit_stmt ~ctx then_;
+          Option.iter (self#visit_stmt ~ctx) else_
       | Output { msg; value } ->
           self#visit_expr ~ctx msg;
           self#visit_expr ~ctx value
@@ -351,6 +355,14 @@ class ['a] map =
           in
           if new_lhs == lhs && new_func == func && not !changed then body
           else FunctionCall { lhs = new_lhs; func = new_func; args = new_args }
+      | Ifthenelse { guard; then_; else_ } ->
+          let new_guard = self#visit_expr ~ctx guard in
+          let new_then = self#visit_stmt ~ctx then_ in
+          let new_else = option_map_preserve (self#visit_stmt ~ctx) else_ in
+          if new_guard == guard && new_then == then_ && new_else == else_ then
+            body
+          else
+            Ifthenelse { guard = new_guard; then_ = new_then; else_ = new_else }
       | Switch { control; cases; default } ->
           let new_control = self#visit_expr ~ctx control in
           let changed = ref false in

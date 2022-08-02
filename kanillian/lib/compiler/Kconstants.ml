@@ -1,3 +1,11 @@
+let hook =
+  let open Cgil_lib.CConstants.Internal_Functions in
+  function
+  | "malloc" -> Some malloc
+  | "calloc" -> Some calloc
+  | "memmove" -> Some memmove
+  | _ -> None
+
 module CBMC_names = struct
   let initialize = "__CPROVER_initialize"
   let start = "__CPROVER__start"
@@ -53,6 +61,7 @@ module Binop_functions = struct
   let modlu = modlu
   let modl = modl
   let modu = modu
+  let overflow_plus_u64 = "i__cbmc_binop_overflow_plus_u64"
 end
 
 module Cast_functions = struct
