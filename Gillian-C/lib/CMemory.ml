@@ -196,6 +196,8 @@ let execute_action name heap params =
       | GetFreed
       | SetFreed
       | RemFreed )
+  | AMem (Poison | ZeroInit) ->
+      failwith "Can't use in concrete because they do not exist in CompCert."
   | AGEnv (RemDef | RemSymbol) ->
       failwith
         (Printf.sprintf

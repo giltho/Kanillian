@@ -277,7 +277,8 @@ let current_arch =
   if Archi.ptr64 then Architecture.Arch64 else Architecture.Arch32
 
 let is_verif_or_act exec_mode =
-  ExecMode.verification_exec exec_mode || ExecMode.biabduction_exec exec_mode
+  ExecMode.is_verification_exec exec_mode
+  || ExecMode.is_biabduction_exec exec_mode
 
 let parse_dependencies_file deps_file =
   let file_str = Gillian.Utils.Io_utils.load_file deps_file in

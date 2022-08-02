@@ -120,13 +120,13 @@ let permission_of_string str =
   | "Writable" -> Writable
   | "Readable" -> Readable
   | "Nonempty" -> Nonempty
-  | _ -> failwith ("Unkown permission : " ^ str)
+  | _ -> failwith ("Unknown permission : " ^ str)
 
 let permission_opt_of_string str =
   try Some (permission_of_string str)
   with Failure _ ->
     if String.equal "None" str then None
-    else failwith ("Unkown optional permission : " ^ str)
+    else failwith ("Unknown optional permission : " ^ str)
 
 let string_of_permission_opt p_opt =
   match p_opt with

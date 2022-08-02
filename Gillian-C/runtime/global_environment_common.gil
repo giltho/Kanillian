@@ -46,21 +46,6 @@ proc i__glob_set_var(symb, vname, size, init_data_list, permission) {
       return
 };
 
-proc i__store_zeros(b, sz) {
-  u := "i__store_zeros_aux"(b, 0i, sz);
-  ret := null;
-  return
-};
-
-proc i__store_zeros_aux(b, curr, sz) {
-  loop: goto [curr i< sz] ctn end;
-  ctn:  u := [mem_store]("int8unsigned", b, curr, {{ "int", 0i }});
-        curr := curr i+ 1i;
-        goto loop;
-  end:  ret := null;
-        return
-};
-
 proc i__store_init_data_list(b, init_data_list) {
         curr_ofs := 0i;
   loop: goto [init_data_list = nil] end ctn;

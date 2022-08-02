@@ -156,6 +156,22 @@ module Mem = struct
     let++ new_tree = map_lift_err loc_name (SHeapTree.free tree low high) in
     make_other @@ SMap.add loc_name new_tree map
 
+  let zero_init { map; _ } loc ofs size =
+    let open DR.Syntax in
+    let** loc_name = resolve_loc_result loc in
+    let** tree = get_tree_res map loc_name in
+    let++ new_tree =
+      map_lift_err loc_name (SHeapTree.zero_init tree ofs size)
+    in
+    make_other @@ SMap.add loc_name new_tree map
+
+  let poison { map; _ } loc ofs size =
+    let open DR.Syntax in
+    let** loc_name = resolve_loc_result loc in
+    let** tree = get_tree_res map loc_name in
+    let++ new_tree = map_lift_err loc_name (SHeapTree.poison tree ofs size) in
+    make_other @@ SMap.add loc_name new_tree map
+
   let get_single { map; _ } loc ofs chunk =
     let open DR.Syntax in
     let** loc_name = resolve_loc_result loc in
@@ -178,7 +194,7 @@ module Mem = struct
   let rem_single { map; last_op } loc ofs chunk =
     let+ loc_name = Delayed.resolve_loc loc in
     match loc_name with
-    | None -> failwith "Executing rem_single with an unkown loc name"
+    | None -> failwith "Executing rem_single with an unknown loc name"
     | Some loc_name ->
         let () =
           match last_op with
@@ -228,7 +244,7 @@ module Mem = struct
   let rem_array { map; last_op } loc ofs size chunk =
     let+ loc_name = Delayed.resolve_loc loc in
     match loc_name with
-    | None -> failwith "Executing rem_array with an unkown loc name"
+    | None -> failwith "Executing rem_array with an unknown loc name"
     | Some loc_name ->
         let () =
           match last_op with
@@ -294,7 +310,7 @@ module Mem = struct
   let rem_simple ~check { map; last_op } loc low high =
     let+ loc_name = Delayed.resolve_loc loc in
     match loc_name with
-    | None -> failwith "Executing rem_simple with an unkown loc name"
+    | None -> failwith "Executing rem_simple with an unknown loc name"
     | Some loc_name ->
         let () =
           if not (check last_op loc_name low high) then
@@ -600,6 +616,22 @@ let execute_move heap params =
       let++ mem = Mem.move heap.mem dst_loc dst_ofs src_loc src_ofs size in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "wrong call to execute_move" params
+
+let execute_zero_init heap params =
+  let open DR.Syntax in
+  match params with
+  | [ loc; ofs; size ] ->
+      let++ mem = Mem.zero_init heap.mem loc ofs size in
+      make_branch ~heap:{ heap with mem } ~rets:[] ()
+  | _ -> fail_ungracefully "store" params
+
+let execute_poison heap params =
+  let open DR.Syntax in
+  match params with
+  | [ loc; ofs; size ] ->
+      let++ mem = Mem.poison heap.mem loc ofs size in
+      make_branch ~heap:{ heap with mem } ~rets:[] ()
+  | _ -> fail_ungracefully "store" params
 
 let execute_get_single heap params =
   let open DR.Syntax in
@@ -925,6 +957,8 @@ let execute_action ~action_name heap params =
     | AMem Load -> execute_load !heap params
     | AMem Free -> execute_free !heap params
     | AMem Move -> execute_move !heap params
+    | AMem ZeroInit -> execute_zero_init !heap params
+    | AMem Poison -> execute_poison !heap params
     | AMem GetSingle -> execute_get_single !heap params
     | AMem SetSingle -> execute_set_single !heap params
     | AMem RemSingle -> execute_rem_single !heap params

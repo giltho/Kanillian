@@ -504,13 +504,13 @@ let rec trans_stmt ~fname ~context stmt =
               gil_lcmds
           in
           (* We should filter assert_s in verif, and assert_v in symb *)
-          if ExecMode.concrete_exec context.exec_mode then [] else gil_lcmds
+          if ExecMode.is_concrete_exec context.exec_mode then [] else gil_lcmds
       | `Invariant inv ->
           let inv = Cmd.Logic (SL inv) in
           set_invariant inv;
           [])
   | Sbuiltin (_, AST.EF_annot_val _, _)
-    when not (ExecMode.symbolic_exec context.exec_mode) ->
+    when not (ExecMode.is_symbolic_exec context.exec_mode) ->
       failwith
         (Format.asprintf
            "The following statement looks like symbolic testing annotations to \
@@ -706,7 +706,7 @@ let is_builtin_func func_name =
   List.mem func_name builtins
 
 let is_gil_func func_name exec_mode =
-  ExecMode.symbolic_exec exec_mode
+  ExecMode.is_symbolic_exec exec_mode
   && (String.equal func_name Builtin_Functions.assume_f
      || String.equal func_name Builtin_Functions.assert_f)
 
@@ -755,7 +755,7 @@ let rec trans_globdefs
       let new_cmd = set_global_function symbol target in
       let new_asrt = Gil_logic_gen.glob_fun_pred symbol target in
       let new_bi_specs =
-        if ExecMode.biabduction_exec exec_mode then
+        if ExecMode.is_biabduction_exec exec_mode then
           Gil_logic_gen.generate_bispec clight_prog symbol id f :: bi_specs
         else []
       in
@@ -925,9 +925,9 @@ let trans_program_with_annots
     prog
     annots =
   let gil_annot =
-    if ExecMode.verification_exec exec_mode then
+    if ExecMode.is_verification_exec exec_mode then
       Gil_logic_gen.trans_annots clight_prog annots filepath
-    else if ExecMode.biabduction_exec exec_mode then
+    else if ExecMode.is_biabduction_exec exec_mode then
       Gil_logic_gen.gen_bi_preds clight_prog
     else Gil_logic_gen.empty
   in

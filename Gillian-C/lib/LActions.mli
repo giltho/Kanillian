@@ -9,6 +9,8 @@ type mem_ac =
   | Load
   | Free
   | Move
+  | Poison
+  | ZeroInit
   | GetSingle
   | SetSingle
   | RemSingle

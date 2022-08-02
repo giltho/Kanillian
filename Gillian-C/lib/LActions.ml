@@ -9,6 +9,8 @@ type mem_ac =
   | Load
   | Free
   | Move
+  | Poison
+  | ZeroInit
   | GetSingle
   | SetSingle
   | RemSingle
@@ -98,6 +100,8 @@ let str_mem_ac = function
   | Load -> "load"
   | Move -> "move"
   | Free -> "free"
+  | Poison -> "poison"
+  | ZeroInit -> "zeroinit"
   | GetSingle -> "getSingle"
   | SetSingle -> "setSingle"
   | RemSingle -> "remSingle"
@@ -126,6 +130,8 @@ let mem_ac_from_str = function
   | "load" -> Load
   | "free" -> Free
   | "move" -> Move
+  | "poison" -> Poison
+  | "zeroinit" -> ZeroInit
   | "getSingle" -> GetSingle
   | "setSingle" -> SetSingle
   | "remSingle" -> RemSingle
@@ -144,7 +150,7 @@ let mem_ac_from_str = function
   | "getFreed" -> GetFreed
   | "setFreed" -> SetFreed
   | "remFreed" -> RemFreed
-  | s -> failwith ("Unkown Memory Action : " ^ s)
+  | s -> failwith ("Unknown Memory Action : " ^ s)
 
 let str_genv_ac = function
   | GetSymbol -> "getsymbol"
@@ -161,7 +167,7 @@ let genv_ac_from_str = function
   | "getdef" -> GetDef
   | "setdef" -> SetDef
   | "remdef" -> RemDef
-  | s -> failwith ("Unkown Global Env Action : " ^ s)
+  | s -> failwith ("Unknown Global Env Action : " ^ s)
 
 let separator_char = '_'
 let separator_string = String.make 1 separator_char
@@ -175,7 +181,7 @@ let ac_from_str str =
   | [ pref; ac ] when String.equal pref mem_prefix -> AMem (mem_ac_from_str ac)
   | [ pref; ac ] when String.equal pref genv_prefix ->
       AGEnv (genv_ac_from_str ac)
-  | _ -> failwith ("Unkown action : " ^ str)
+  | _ -> failwith ("Unknown action : " ^ str)
 
 let str_mem_ga = function
   | Single -> "single"
@@ -196,7 +202,7 @@ let mem_ga_from_str = function
   | "zeros" -> Zeros
   | "hole" -> Hole
   | "freed" -> Freed
-  | str -> failwith ("Unkown memory assertion : " ^ str)
+  | str -> failwith ("Unknown memory assertion : " ^ str)
 
 let genv_ga_from_str = function
   | "symb" -> Symbol

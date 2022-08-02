@@ -57,6 +57,18 @@ module Imports = struct
         genv_config = any_genv_config;
       };
       {
+        file = "global_environment_common_concrete.gil";
+        arch = any_arch;
+        exec = concrete_exec;
+        genv_config = any_genv_config;
+      };
+      {
+        file = "global_environment_common_symbolic.gil";
+        arch = any_arch;
+        exec = non_concrete_exec;
+        genv_config = any_genv_config;
+      };
+      {
         file = "binops_common.gil";
         arch = any_arch;
         exec = all_exec;

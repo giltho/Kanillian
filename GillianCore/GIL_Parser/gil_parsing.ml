@@ -60,7 +60,7 @@ let parse_from_string start str =
            msg)
   | _ ->
       failwith
-        (Printf.sprintf "Unkown parsing error while parsing the string:@\n%s"
+        (Printf.sprintf "Unknown parsing error while parsing the string:@\n%s"
            str)
 
 let parse_eprog_from_string : string -> (Annot.t, string) Prog.t =

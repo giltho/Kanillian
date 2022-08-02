@@ -67,6 +67,8 @@ val set_zeros : t -> Expr.t -> Expr.t -> Perm.t -> t d_or_error
 val get_freed : t -> unit or_error
 val alloc : Expr.t -> Expr.t -> t
 val store : t -> Chunk.t -> Expr.t -> SVal.t -> t d_or_error
+val poison : t -> Expr.t -> Expr.t -> t d_or_error
+val zero_init : t -> Expr.t -> Expr.t -> t d_or_error
 val load : t -> Chunk.t -> Expr.t -> (SVal.t * t) d_or_error
 val free : t -> Expr.t -> Expr.t -> t d_or_error
 val drop_perm : t -> Expr.t -> Expr.t -> Perm.t -> t d_or_error

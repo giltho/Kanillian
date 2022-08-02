@@ -1,18 +1,18 @@
 type t = Concrete | Verification | Symbolic | BiAbduction
 
-let concrete_exec = function
+let is_concrete_exec = function
   | Concrete -> true
   | _ -> false
 
-let symbolic_exec = function
+let is_symbolic_exec = function
   | Symbolic -> true
   | _ -> false
 
-let verification_exec = function
+let is_verification_exec = function
   | Verification -> true
   | _ -> false
 
-let biabduction_exec = function
+let is_biabduction_exec = function
   | BiAbduction -> true
   | _ -> false
 
@@ -22,6 +22,8 @@ let exec_with_preds = [ Verification; BiAbduction ]
 let bi_exec = [ BiAbduction ]
 let ver_exec = [ Verification ]
 let non_ver_exec = [ Concrete; Symbolic; BiAbduction ]
+let concrete_exec = [ Concrete ]
+let non_concrete_exec = [ Verification; Symbolic; BiAbduction ]
 
 let to_string = function
   | Concrete -> "concrete"

@@ -554,7 +554,7 @@ struct
         let f' = SVal.SESubst.substitute_formula store_subst ~partial:true f in
         (* Printf.printf "Assuming %s\n" (Formula.str f'); *)
         let fos =
-          if ExecMode.biabduction_exec !Config.current_exec_mode then
+          if ExecMode.is_biabduction_exec !Config.current_exec_mode then
             let fos = Formula.get_disjuncts f' in
             match fos with
             | [] -> []
@@ -598,7 +598,7 @@ struct
                 Fmt.(option ~none:(any "CANNOT CREATE MODEL") ESubst.pp)
                 failing_model
             in
-            if not (ExecMode.biabduction_exec !Config.current_exec_mode) then
+            if not (ExecMode.is_biabduction_exec !Config.current_exec_mode) then
               Printf.printf "%s" msg;
             L.normal (fun m -> m "%s" msg);
             raise (Interpreter_error ([ EState err ], state)))
@@ -719,7 +719,7 @@ struct
     let loop_ids = Annot.get_loop_info annot @ CallStack.get_loop_ids cs in
 
     let loop_action : loop_action =
-      if ExecMode.verification_exec !Config.current_exec_mode then
+      if ExecMode.is_verification_exec !Config.current_exec_mode then
         understand_loop_action loop_ids prev_loop_ids
       else Nothing
     in
@@ -764,7 +764,7 @@ struct
     let annot, cmd = annot_cmd in
     let loop_ids = Annot.get_loop_info annot @ CallStack.get_loop_ids cs in
     let loop_action : loop_action =
-      if ExecMode.verification_exec !Config.current_exec_mode then
+      if ExecMode.is_verification_exec !Config.current_exec_mode then
         understand_loop_action loop_ids prev_loop_ids
       else Nothing
     in
@@ -946,7 +946,7 @@ struct
             else symb_exec_proc ()
       in
 
-      match ExecMode.biabduction_exec !Config.current_exec_mode with
+      match ExecMode.is_biabduction_exec !Config.current_exec_mode with
       | true -> (
           match
             ( pid = caller,
@@ -1041,7 +1041,7 @@ struct
                   ~json:
                     [ ("errs", `List (List.map state_err_t_to_yojson errs)) ]
                   "AFail");
-            if not (ExecMode.concrete_exec !Config.current_exec_mode) then (
+            if not (ExecMode.is_concrete_exec !Config.current_exec_mode) then (
               let expr_params = List.map Val.to_expr v_es in
               let recovery_params =
                 List.concat_map Expr.base_elements expr_params
@@ -1336,7 +1336,7 @@ struct
               in
               let ( let+ ) x f = List.map f x in
               let+ state =
-                if ExecMode.verification_exec !Config.current_exec_mode then
+                if ExecMode.is_verification_exec !Config.current_exec_mode then
                   State.frame_on state iframes to_frame_on
                 else [ state ]
               in
@@ -1382,7 +1382,7 @@ struct
             in
             let ( let+ ) x f = List.map f x in
             let+ state =
-              if ExecMode.verification_exec !Config.current_exec_mode then
+              if ExecMode.is_verification_exec !Config.current_exec_mode then
                 State.frame_on state iframes to_frame_on
               else [ state ]
             in

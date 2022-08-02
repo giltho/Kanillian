@@ -83,6 +83,10 @@ module Range = struct
       [ from; to_ ]
   end
 
+  let of_low_and_size low size =
+    let open Expr.Infix in
+    (low, low + size)
+
   let of_low_and_chunk low chunk =
     let open Expr.Infix in
     let len = Expr.int (Chunk.size chunk) in
@@ -655,6 +659,9 @@ module Tree = struct
   let undefined ?(perm = Perm.Freeable) span =
     make ~node:(Node.undefined ~perm) ~span ()
 
+  let zeros ?(perm = Perm.Freeable) span =
+    make ~node:(Node.make_owned ~mem_val:Zeros ~perm) ~span ()
+
   let create_root range =
     {
       children = None;
@@ -964,6 +971,38 @@ module Tree = struct
       | MemVal { min_perm; _ } ->
           if min_perm >=% Writable then
             Ok (sval_leaf ~low ~chunk ~value:sval ~perm:min_perm)
+          else
+            Error
+              (InsufficientPermission { required = Writable; actual = min_perm })
+    in
+    let rebuild_parent = of_children in
+    let++ _, tree = frame_range t ~replace_node ~rebuild_parent range in
+    tree
+
+  let zero_init (t : t) (range : Range.t) : (t, err) DR.t =
+    let open DR.Syntax in
+    let open Perm.Infix in
+    let replace_node node =
+      match node.node with
+      | NotOwned _ -> Error MissingResource
+      | MemVal { min_perm; _ } ->
+          if min_perm >=% Writable then Ok (zeros ~perm:min_perm range)
+          else
+            Error
+              (InsufficientPermission { required = Writable; actual = min_perm })
+    in
+    let rebuild_parent = of_children in
+    let++ _, tree = frame_range t ~replace_node ~rebuild_parent range in
+    tree
+
+  let poison (t : t) (range : Range.t) : (t, err) DR.t =
+    let open DR.Syntax in
+    let open Perm.Infix in
+    let replace_node node =
+      match node.node with
+      | NotOwned _ -> Error MissingResource
+      | MemVal { min_perm; _ } ->
+          if min_perm >=% Writable then Ok (undefined ~perm:min_perm range)
           else
             Error
               (InsufficientPermission { required = Writable; actual = min_perm })
@@ -1414,6 +1453,32 @@ let store t chunk ofs value =
     | None -> DR.error MissingResource
     | Some root ->
         let** root = Tree.store root ofs chunk value in
+        DR.of_result (with_root t root)
+  else DR.error BufferOverrun
+
+let zero_init t ofs size =
+  let open DR.Syntax in
+  let range = Range.of_low_and_size ofs size in
+  let** span = DR.of_result (get_bounds t) in
+  if%sat is_in_bounds range span then
+    let** root = DR.of_result (get_root t) in
+    match root with
+    | None -> DR.error MissingResource
+    | Some root ->
+        let** root = Tree.zero_init root range in
+        DR.of_result (with_root t root)
+  else DR.error BufferOverrun
+
+let poison t ofs size =
+  let open DR.Syntax in
+  let range = Range.of_low_and_size ofs size in
+  let** span = DR.of_result (get_bounds t) in
+  if%sat is_in_bounds range span then
+    let** root = DR.of_result (get_root t) in
+    match root with
+    | None -> DR.error MissingResource
+    | Some root ->
+        let** root = Tree.poison root range in
         DR.of_result (with_root t root)
   else DR.error BufferOverrun
 
