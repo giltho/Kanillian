@@ -90,13 +90,20 @@ let fresh_v t = t.fresh_v ()
 let fresh_lab t = t.fresh_lab ()
 let in_memory t x = Hashset.mem t.in_memory x
 let is_local t x = Hashtbl.mem t.locals x
+let tag_lookup ctx x = Hashtbl.find ctx.prog.types x
+
+let resolve_type ctx t =
+  match t with
+  | Type.StructTag tag -> tag_lookup ctx tag
+  | Type.UnionTag tag -> tag_lookup ctx tag
+  | _ -> t
 
 let register_allocated_temp ctx ~name:symbol ~type_ ~location =
   let local = Local.{ symbol; type_; location } in
   Hashset.add ctx.allocated_temps local
 
 let rec resolve_struct_components ctx (ty : Type.t) =
-  let tag_lookup x = Hashtbl.find ctx.prog.types x in
+  let tag_lookup x = tag_lookup ctx x in
   match ty with
   | Struct { components; _ } -> components
   | StructTag x -> resolve_struct_components ctx (tag_lookup x)
@@ -104,13 +111,13 @@ let rec resolve_struct_components ctx (ty : Type.t) =
 
 let size_of ctx ty =
   Error.rethrow_gerror (fun () ->
-      let tag_lookup x = Hashtbl.find ctx.prog.types x in
+      let tag_lookup x = tag_lookup ctx x in
       let machine = ctx.machine in
       Type.size_of ~tag_lookup ~machine ty)
 
 let offset_struct_field ctx ty field =
   Error.rethrow_gerror (fun () ->
-      let tag_lookup x = Hashtbl.find ctx.prog.types x in
+      let tag_lookup x = tag_lookup ctx x in
       let machine = ctx.machine in
       Type.offset_struct_field ~tag_lookup ~machine ty field)
 
@@ -152,3 +159,6 @@ let is_function_symbol ctx s =
   | "__CPROVER_initialize"
   | "__CPROVER__start" -> true
   | _ -> Hashtbl.mem ctx.prog.funs s
+
+let type_equal ctx ta tb =
+  Type.equal (resolve_type ctx ta) (resolve_type ctx tb)

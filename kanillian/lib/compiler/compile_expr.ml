@@ -169,6 +169,27 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
       in
       let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
       Cs.unit [ assume_list; assume_int ]
+  | (Signedbv { width } | Unsignedbv { width })
+    when width == 8 || width == 16 || width == 32 ->
+      let str_constr = Cgil_lib.CConstants.VTypes.int_type in
+      let* value = fresh_sv ctx in
+      let value = Expr.PVar value in
+      let assume_list =
+        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
+        Cmd.Logic (Assume f)
+      in
+      let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
+      Cs.unit [ assume_list; assume_int ]
+  | (Signedbv { width } | Unsignedbv { width }) when width == 64 ->
+      let str_constr = Cgil_lib.CConstants.VTypes.long_type in
+      let* value = fresh_sv ctx in
+      let value = Expr.PVar value in
+      let assume_list =
+        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
+        Cmd.Logic (Assume f)
+      in
+      let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
+      Cs.unit [ assume_list; assume_int ]
   | Double ->
       let open Cgil_lib.CConstants.VTypes in
       let* value = fresh_sv ctx in
@@ -207,17 +228,18 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   | StructTag tag | UnionTag tag | Struct { tag; _ } | Union { tag; _ } ->
       (* TODO: Add a signal here for something unhandled! *)
       let fail =
-        assert_unhandled ~feature:CompositNondet [ Lit (String tag) ]
+        assert_unhandled ~feature:(CompositNondet type_) [ Lit (String tag) ]
       in
       Cs.unit [ fail ]
   | _ ->
       let ty_str = GType.show type_ in
       let fail =
-        assert_unhandled ~feature:CompositNondet [ Lit (String ty_str) ]
+        assert_unhandled ~feature:(CompositNondet type_) [ Lit (String ty_str) ]
       in
       Cs.unit [ fail ]
 
-let nondet_expr ~ctx ~add_annot ~type_ () : Val_repr.t Cs.with_body =
+let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
+  let b = Body_item.make_hloc ~loc in
   let open Cs.Syntax in
   let is_symbolic_exec =
     let open Gillian.Utils in
@@ -227,24 +249,118 @@ let nondet_expr ~ctx ~add_annot ~type_ () : Val_repr.t Cs.with_body =
     Error.user_error
       "Looks like you're compiling some nondet variables, but you're not in \
        symbolic execution mode"
+  else if Ctx.is_zst_access ctx type_ then
+    Cs.return (Val_repr.ByValue (Lit Null))
+  else if Ctx.representable_in_store ctx type_ then
+    let* fresh = fresh_sv ctx |> Cs.map_l b in
+    let fresh = Expr.PVar fresh in
+    let+ () = assume_type ~ctx type_ fresh |> Cs.map_l b in
+    Val_repr.ByValue fresh
   else
-    let res =
-      if Ctx.is_zst_access ctx type_ then
-        Cs.return (Val_repr.ByValue (Lit Null))
-      else if Ctx.representable_in_store ctx type_ then
-        let* fresh = fresh_sv ctx in
-        let fresh = Expr.PVar fresh in
-        let+ () = assume_type ~ctx type_ fresh in
-        Val_repr.ByValue fresh
-      else
+    match type_ with
+    | StructTag tag | UnionTag tag ->
+        nondet_expr ~ctx ~loc ~type_:(Ctx.tag_lookup ctx tag) ()
+    | Struct { components; _ } ->
+        let rec writes curr components () =
+          match components with
+          | [] -> Seq.Nil
+          | Datatype_component.Padding { bits; _ } :: fields ->
+              (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
+              let width = bits / 8 in
+              Cons
+                ((curr, Val_repr.Poison { width }), writes (curr + width) fields)
+          | Field { type_; _ } :: fields ->
+              let rest = writes (curr + Ctx.size_of ctx type_) fields in
+              if Ctx.is_zst_access ctx type_ then rest ()
+              else
+                Cons
+                  ( ( curr,
+                      Val_repr.V
+                        { type_; value = nondet_expr ~ctx ~loc ~type_ () } ),
+                    rest )
+        in
+        let writes = writes 0 components in
+        Cs.return (Val_repr.ByCompositValue { type_; writes })
+    | Array (ty, sz) ->
+        let rec writes cur () =
+          if cur == sz then Seq.Nil
+          else
+            Cons
+              ( ( cur,
+                  Val_repr.V
+                    { type_ = ty; value = nondet_expr ~ctx ~loc ~type_:ty () }
+                ),
+                writes (cur + 1) )
+        in
+        let writes = writes 0 in
+        Cs.return (Val_repr.ByCompositValue { type_; writes })
+    | Union { components; _ } ->
+        (* Ok this one is tricky, because each variant will have
+           a different layout, and that doesn't work well with my memory.
+           So we'll have to branch *)
+        let variant_amount = List.length components in
+        let* variant =
+          Cs.map_l b
+          @@ let* variant = fresh_sv ctx in
+             let variant = Expr.PVar variant in
+             let variant_number = Expr.int variant_amount in
+             let variant_int = LCmd.AssumeType (variant, IntType) in
+             let variant_constraint =
+               let open Formula.Infix in
+               Expr.zero_i #<= variant #&& (variant #< variant_number)
+             in
+             let variant_value = LCmd.Assume variant_constraint in
+             Cs.return
+               ~app:[ Cmd.Logic variant_int; Logic variant_value ]
+               variant
+        in
+        let* ret_ptr =
+          Memory.alloc_temp ~ctx ~location:loc type_ |> Cs.map_l b
+        in
+        let end_lab = Ctx.fresh_lab ctx in
+        let goto_end = Cmd.Goto end_lab in
+        let next_lab = ref None in
+        let rec gen i components =
+          match components with
+          | [] -> []
+          | Datatype_component.Padding _ :: _ ->
+              Error.unexpected "Padding in union fields"
+          | Field { type_; _ } :: rest ->
+              let curr_lab = !next_lab in
+              let nlab = Ctx.fresh_lab ctx in
+              let () = next_lab := Some nlab in
+              let block_lab = Ctx.fresh_lab ctx in
+              let goto =
+                b ?label:curr_lab
+                  (Cmd.GuardedGoto
+                     (Expr.BinOp (variant, Equal, Expr.int i), block_lab, nlab))
+              in
+              let v, cmds = nondet_expr ~ctx ~loc ~type_ () in
+              let write =
+                Memory.write ~ctx ~type_ ~annot:b ~dst:ret_ptr ~src:v
+              in
+              let block =
+                set_first_label ~annot:(b ~loop:[]) block_lab
+                  (cmds @ write @ [ b goto_end ])
+              in
+              (goto :: block) @ gen (i + 1) rest
+        in
+        let* () = Cs.unit (gen 0 components) in
+        let* () =
+          Cs.unit
+            [
+              b ?label:!next_lab (Fail ("Unreachable", []));
+              b ~label:end_lab Skip;
+            ]
+        in
+        Cs.return (Val_repr.ByCopy { type_; ptr = ret_ptr })
+    | _ ->
         let fail_cmd =
-          assert_unhandled ~feature:CompositNondet
+          assert_unhandled ~feature:(CompositNondet type_)
             [ Expr.string (GType.show type_) ]
         in
-        let+ () = Cs.unit [ fail_cmd ] in
+        let+ () = Cs.unit [ b fail_cmd ] in
         Val_repr.ByCopy { ptr = Lit Nono; type_ }
-    in
-    Cs.map_l add_annot res
 
 let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     Val_repr.t Cs.with_cmds =
@@ -539,7 +655,7 @@ and compile_assign ~ctx ~annot ~lhs ~rhs =
         [ annot (Memory.store_scalar ~ctx ptr v lhs.type_) ]
     | ( InMemoryComposit { ptr = ptr_access; type_ = type_access },
         ByCopy { ptr = ptr_v; type_ = type_v } ) ->
-        if not (GType.equal type_v type_access) then
+        if not (Ctx.type_equal ctx type_v type_access) then
           Error.unexpected "ByCopy assignment with different types on each side"
         else
           let copy_cmd =
@@ -665,7 +781,7 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       | op ->
           let cmd = b (Helpers.assert_unhandled ~feature:(UnOp op) []) in
           Cs.return ~app:[ cmd ] (Val_repr.ByValue (Lit Nono)))
-  | Nondet -> nondet_expr ~ctx ~add_annot:b ~type_:expr.type_ ()
+  | Nondet -> nondet_expr ~ctx ~loc:expr.location ~type_:expr.type_ ()
   | TypeCast to_cast ->
       let* to_cast_e = compile_expr to_cast in
       compile_cast ~ctx ~from:to_cast.type_ ~into:expr.type_ to_cast_e

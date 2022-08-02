@@ -193,3 +193,15 @@ let write_composit
         body @ cmds @ aux start_ofs rest
   in
   aux 0 writes
+
+let write ~ctx ~(type_ : GType.t) ~annot ~(dst : Expr.t) ~(src : Val_repr.t) :
+    Body_item.t list =
+  if Ctx.is_zst_access ctx type_ then []
+  else
+    match src with
+    | Val_repr.ByCopy { ptr = src; type_ } ->
+        [ annot (memcpy ~ctx ~dst ~src ~type_) ]
+    | Val_repr.ByValue e -> [ annot (store_scalar ~ctx dst e type_) ]
+    | Val_repr.ByCompositValue { writes; _ } ->
+        write_composit ~ctx ~annot ~dst writes
+    | Val_repr.Procedure _ -> Error.code_error "Writing a procedure"
