@@ -40,8 +40,10 @@ module Local = struct
 
         method! visit_expr_value ~ctx ~type_ (e : Expr.value) =
           match e with
-          | Member { lhs = e; _ } | Index { array = e; _ } | AddressOf e ->
-              super#visit_expr ~ctx:true e
+          | Member { lhs = e; _ }
+          | Index { array = e; _ }
+          | AddressOf e
+          | ByteExtract { e; _ } -> super#visit_expr ~ctx:true e
           | Symbol x when ctx || not (representable_in_store ~prog type_) ->
               Hashset.add in_memory x
           | _ -> super#visit_expr_value ~ctx ~type_ e
