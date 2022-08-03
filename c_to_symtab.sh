@@ -1,1 +1,0 @@
-cbmc $1 --show-symbol-table --json-ui | jq '.[] | select(has("symbolTable"))' > $1.symtab.json
