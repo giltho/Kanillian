@@ -1,5 +1,5 @@
 module Gerror = Gerror
-module Machine_model = Machine_model
+module Machine_model_parse = Machine_model_parse
 module IntType = IntType
 module Ops = Ops
 module Param = Param

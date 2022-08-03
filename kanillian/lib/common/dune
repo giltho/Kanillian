@@ -1,0 +1,5 @@
+(library
+ (name kcommons)
+ (libraries ppx_deriving.runtime)
+ (preprocess
+  (pps ppx_deriving.std)))

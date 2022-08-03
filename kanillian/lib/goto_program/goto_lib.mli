@@ -3,33 +3,9 @@ module Gerror : sig
   exception Code_error of Irep.t option * string
 end
 
-module Machine_model : sig
-  type t = {
-    alignment : int;
-    bool_width : int;
-    char_is_unsigned : bool;
-    char_width : int;
-    double_width : int;
-    int_width : int;
-    is_big_endian : bool;
-    long_double_width : int;
-    long_int_width : int;
-    long_long_int_width : int;
-    memory_operand_size : int;
-    null_is_zero : bool;
-    pointer_width : int;
-    short_int_width : int;
-    single_width : int;
-    wchar_t_is_unsigned : bool;
-    wchar_t_width : int;
-    word_size : int;
-  }
-  [@@deriving eq, show]
-
-  val archi64 : t
-
+module Machine_model_parse : sig
   (** Consumes the architecture data from the symtab, and returns the built machine_model. *)
-  val consume_from_symtab : Symtab.t -> t
+  val consume_from_symtab : Symtab.t -> Machine_model.t
 end
 
 module Ops : sig
@@ -112,11 +88,11 @@ module IntType : sig
     type t = { signed : bool; width : int }
 
     val equal : t -> t -> bool
-    val encode : machine:Machine_model.t -> int_type -> t
+    val encode : machine:Kcommons.Machine_model.t -> int_type -> t
   end
 
   val which_int_type_opt :
-    machine:Machine_model.t -> signed:bool -> width:int -> t option
+    machine:Kcommons.Machine_model.t -> signed:bool -> width:int -> t option
 end
 
 module rec Param : sig

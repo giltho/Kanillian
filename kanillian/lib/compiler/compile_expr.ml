@@ -33,11 +33,11 @@ let compile_binop
   (* For now, we assume we're on archi64 exactly,
      then we'll figure out a bit more.
      This is for size_t and pointer operations. *)
-  assert (Machine_model.equal Machine_model.archi64 ctx.machine);
+  assert (Machine_model.(equal archi64 ctx.machine));
   let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
-    let open Kconstants.Comp_functions in
-    let open Kconstants.Binop_functions in
+    let open Constants.Comp_functions in
+    let open Constants.Binop_functions in
     match binop with
     | Equal -> (
         match lty with
@@ -121,11 +121,12 @@ let compile_binop
                && (width_a == 8 || width_a == 16 || width_a == 32) -> `Proc modu
         | _ -> `Unhandled `With_type)
     | Or -> `GilBinop BinOp.BOr
+    | And -> `GilBinop BinOp.BAnd
     | OverflowPlus -> (
         match (lty, rty) with
         | CInteger I_size_t, CInteger I_size_t
           when match Ctx.archi ctx with
-               | `Archi64 -> true
+               | Arch64 -> true
                | _ -> false -> `Proc overflow_plus_u64
         | Unsignedbv { width = 64 }, Unsignedbv { width = 64 } ->
             `Proc overflow_plus_u64
@@ -168,7 +169,7 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
         match ty with
         | I_int | I_char | I_bool -> int_type
         | I_size_t | I_ssize_t ->
-            if Ctx.archi ctx == `Archi64 then long_type else int_type
+            if Ctx.archi ctx == Arch64 then long_type else int_type
       in
       let* value = fresh_sv ctx in
       let value = Expr.PVar value in
@@ -383,24 +384,24 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
         `Proc Cgil_lib.CConstants.UnOp_Functions.longofint
     | Unsignedbv { width = 32 }, CInteger I_ssize_t -> (
         match Ctx.archi ctx with
-        | `Archi32 -> `Proc Kconstants.Cast_functions.unsign_int
-        | `Archi64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
+        | Arch32 -> `Proc Constants.Cast_functions.unsign_int
+        | Arch64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
     | CInteger I_int, Unsignedbv { width } when ctx.machine.int_width == width
-      -> `Proc Kconstants.Cast_functions.unsign_int
+      -> `Proc Constants.Cast_functions.unsign_int
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 64
-      -> `Proc Kconstants.Cast_functions.unsign_long
+      -> `Proc Constants.Cast_functions.unsign_long
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
-      -> `Proc Kconstants.Cast_functions.unsign_int
+      -> `Proc Constants.Cast_functions.unsign_int
     | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 64
-      -> `Proc Kconstants.Cast_functions.sign_long
+      -> `Proc Constants.Cast_functions.sign_long
     | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 32
-      -> `Proc Kconstants.Cast_functions.sign_int
+      -> `Proc Constants.Cast_functions.sign_int
     | Unsignedbv { width = 8 | 16 }, CInteger (I_size_t | I_ssize_t) -> (
         (* We're only considering archi32 and 64, u8 and u16 are
            guaranteed to fit inside size_t and ssize_t *)
         match Ctx.archi ctx with
-        | `Archi32 -> `Nop
-        | `Archi64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
+        | Arch32 -> `Nop
+        | Arch64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
     | Pointer _, Pointer _ -> `Nop
     | Pointer _, CInteger I_size_t ->
         (* One cool thing is that, in c#m, size_t and pointer is the same type. *)
@@ -499,16 +500,16 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           let ty =
             let open Cgil_lib.CConstants.VTypes in
             match Ctx.archi ctx with
-            | `Archi32 -> int_type
-            | `Archi64 -> long_type
+            | Arch32 -> int_type
+            | Arch64 -> long_type
           in
           Expr.EList [ Lit (String ty); Expr.int sz_i ]
         in
         let* offset =
           let mult =
             match Ctx.archi ctx with
-            | `Archi32 -> Kconstants.Binop_functions.mul
-            | `Archi64 -> Kconstants.Binop_functions.mull
+            | Arch32 -> Constants.Binop_functions.mul
+            | Arch64 -> Constants.Binop_functions.mull
           in
           let res = Ctx.fresh_v ctx in
           let call =
@@ -637,7 +638,7 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
       let fname =
         match e with
         | Procedure (Lit (String f) as fname) -> (
-            match Kconstants.hook f with
+            match Constants.Internal_functions.hook f with
             | Some fname -> Expr.string fname
             | _ -> fname)
         | Procedure e -> e
@@ -781,8 +782,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       let i = Gcu.Camlcoq.Z.of_sint b in
       let v =
         match Ctx.archi ctx with
-        | `Archi32 -> Gcu.Values.Vint i
-        | `Archi64 -> Gcu.Values.Vlong i
+        | Arch32 -> Gcu.Values.Vint i
+        | Arch64 -> Gcu.Values.Vlong i
       in
       let lit = Gcu.Vt.gil_of_compcert v in
       by_value (Lit lit)
@@ -794,8 +795,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         | CInteger (I_int | I_char | I_bool) -> Vint cz
         | CInteger (I_size_t | I_ssize_t) -> (
             match Ctx.archi ctx with
-            | `Archi32 -> Vint cz
-            | `Archi64 -> Vlong cz)
+            | Arch32 -> Vint cz
+            | Arch64 -> Vlong cz)
         | Unsignedbv { width } | Signedbv { width } ->
             if width <= 32 then Vint cz else Vlong cz
         | _ -> Error.unexpected "IntConstant with non-int type"

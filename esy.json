@@ -47,7 +47,7 @@
       },
       "KANILLIAN_RUNTIME_PATH": {
         "scope": "global",
-        "val": "#{self.share}/kanillian:#{self.share}/gillian-c"
+        "val": "#{self.share}/kanillian"
       },
       "CPATH": {
         "scope": "global",

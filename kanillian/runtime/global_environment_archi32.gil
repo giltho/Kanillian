@@ -1,0 +1,11 @@
+#internal
+
+proc i__ptr_chunk() {
+  ret := "int32";
+  return
+};
+
+proc i__ptr_size() {
+  ret := 4i;
+  return
+};

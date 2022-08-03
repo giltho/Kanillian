@@ -80,13 +80,13 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
             | ByValue e -> Cs.return e
             | ByCopy { ptr; type_ } ->
                 let dst =
-                  Expr.PVar Kconstants.Kanillian_names.return_by_copy_name
+                  Expr.PVar Constants.Kanillian_names.return_by_copy_name
                 in
                 let copy_cmd = Memory.memcpy ~ctx ~type_ ~src:ptr ~dst in
                 Cs.return ~app:[ b copy_cmd ] (Expr.Lit Undefined)
             | ByCompositValue { writes; _ } ->
                 let dst =
-                  Expr.PVar Kconstants.Kanillian_names.return_by_copy_name
+                  Expr.PVar Constants.Kanillian_names.return_by_copy_name
                 in
                 let cmds = Memory.write_composit ~ctx ~annot:b ~dst writes in
                 Cs.return ~app:cmds (Expr.Lit Undefined)
@@ -96,9 +96,7 @@ let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
       let variable = Utils.Names.return_variable in
       s
       @ add_annot
-          [
-            Assignment (variable, e); Goto Kconstants.Kanillian_names.ret_label;
-          ]
+          [ Assignment (variable, e); Goto Constants.Kanillian_names.ret_label ]
   | Decl { lhs = glhs; value } ->
       (* TODO:
          I have too many if/elses for deciding how things should be done,
@@ -276,7 +274,7 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
   in
   let symexpr = Expr.string fn.symbol in
   let target =
-    match Kconstants.hook fn.symbol with
+    match Constants.Internal_functions.hook fn.symbol with
     | Some f -> f
     | None -> fn.symbol
   in
@@ -315,7 +313,7 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
     let assign_cmd = b @@ Cmd.Assignment (loc, loc_expr) in
     let loc = Expr.PVar loc in
     let store_zeros_cmd =
-      let store_zeros = Cgil_lib.CConstants.Internal_Functions.store_zeros in
+      let store_zeros = Constants.Internal_functions.store_zeros in
       b @@ Cmd.Call ("u", Lit (String store_zeros), [ loc; size ], None, None)
     in
 
@@ -374,7 +372,7 @@ let set_global_env_proc (ctx : Ctx.t) =
   let body = Array.of_seq body in
   Proc.
     {
-      proc_name = Kconstants.CBMC_names.initialize;
+      proc_name = Constants.CBMC_names.initialize;
       proc_source_path = None;
       proc_internal = true;
       proc_body = body;
@@ -454,7 +452,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
     b (Assignment (Kutils.Names.return_variable, Lit Undefined))
   in
   let return_block =
-    set_first_label ~annot:(b ~loop:[]) Kconstants.Kanillian_names.ret_label
+    set_first_label ~annot:(b ~loop:[]) Constants.Kanillian_names.ret_label
       (free_locals @ [ b ReturnNormal ])
   in
   let alloc_params = compile_alloc_params ~ctx proc_params |> List.map b in
@@ -467,7 +465,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
   let proc_params =
     let identifiers = List.map fst proc_params in
     if Ctx.representable_in_store ctx func.return_type then identifiers
-    else Kconstants.Kanillian_names.return_by_copy_name :: identifiers
+    else Constants.Kanillian_names.return_by_copy_name :: identifiers
   in
   Proc.
     {
@@ -481,7 +479,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
 
 let start_for_harness harness =
   let init_call =
-    let init_f = Kconstants.CBMC_names.initialize in
+    let init_f = Constants.CBMC_names.initialize in
     Body_item.make (Cmd.Call ("u", Lit (String init_f), [], None, None))
   in
   let harness = Sanitize.sanitize_symbol harness in
@@ -494,7 +492,7 @@ let start_for_harness harness =
   let body = [| init_call; harness_call; return |] in
   Proc.
     {
-      proc_name = Kconstants.CBMC_names.start;
+      proc_name = Constants.CBMC_names.start;
       proc_source_path = None;
       proc_internal = true;
       proc_body = body;
@@ -509,7 +507,7 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
     Program.fold_functions
       (fun _ f prog ->
         (* Only compile the function if it isn't hooked *)
-        if Option.is_none (Kconstants.hook f.symbol) then
+        if Option.is_none (Constants.Internal_functions.hook f.symbol) then
           Prog.add_proc prog (compile_function ~ctx:context f)
         else prog)
       program gil_prog
@@ -524,8 +522,8 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   in
   assert (Machine_model.equal context.machine Machine_model.archi64);
   let imports =
-    Kconstants.Imports.imports
-    @ Cgil_lib.CConstants.Imports.imports Arch64
+    Constants.Imports.imports
+    @ Imports.imports Arch64
         !Gillian.Utils.Config.current_exec_mode
         Unallocated_functions
   in

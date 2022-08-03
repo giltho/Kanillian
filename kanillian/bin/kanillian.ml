@@ -1,4 +1,4 @@
-open Cgil_lib
+open Memory_model
 open Kanillian
 module SMemory = Gillian.Monadic.MonadicSMemory.Lift (MonadicSMemory)
 

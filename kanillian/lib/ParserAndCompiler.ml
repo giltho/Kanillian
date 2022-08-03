@@ -1,17 +1,14 @@
 open Gillian
-module CP = Cgil_lib.ParserAndCompiler
+open Kcommons
 
 let initialize _ =
   let open Kanillian_compiler in
-  CP.init_compcert ();
-  Utils.Config.entry_point := Kconstants.CBMC_names.start;
+  Utils.Config.entry_point := Constants.CBMC_names.start;
   Option.iter
     (fun kstats_file -> at_exit (fun () -> Stats.report kstats_file))
     !Kconfig.kstats_file
 
-let env_var_import_path =
-  Some Kanillian_compiler.Kconstants.Imports.env_path_var
-
+let env_var_import_path = Some Constants.Imports.env_path_var
 let other_imports = []
 
 type tl_ast = Program.t
@@ -72,7 +69,7 @@ let parse_symtab_into_goto file =
   let tbl = Irep_lib.Symtab.of_yojson json in
   Result.map
     (fun tbl ->
-      let machine = Machine_model.consume_from_symtab tbl in
+      let machine = Machine_model_parse.consume_from_symtab tbl in
       if not Machine_model.(equal machine archi64) then
         failwith "For now, kanillian can only run on archi64";
       Kconfig.machine_model := machine;
