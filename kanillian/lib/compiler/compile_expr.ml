@@ -395,7 +395,16 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
       -> `Proc Kconstants.Cast_functions.sign_long
     | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 32
       -> `Proc Kconstants.Cast_functions.sign_int
+    | Unsignedbv { width = 8 | 16 }, CInteger (I_size_t | I_ssize_t) -> (
+        (* We're only considering archi32 and 64, u8 and u16 are
+           guaranteed to fit inside size_t and ssize_t *)
+        match Ctx.archi ctx with
+        | `Archi32 -> `Nop
+        | `Archi64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
     | Pointer _, Pointer _ -> `Nop
+    | Pointer _, CInteger I_size_t ->
+        (* One cool thing is that, in c#m, size_t and pointer is the same type. *)
+        `Nop
     | _ -> `Unhandled
   in
   match cast_with with
@@ -853,7 +862,13 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         (Val_repr.equal res_then res_else)
         "if branche exprs must be equal";
       Cs.return ~app:[ b ~label:end_lab Skip ] res_then
-  | ByteExtract _ -> unhandled ByteExtract
+  | ByteExtract _ ->
+      unhandled ByteExtract
+      (* let* ce = compile_expr e in
+         match ce with
+         | ByCopy { ptr; type_ } ->
+         | ByValue _ -> Error.code_error "ByteExtract targets should be in memory"
+         | Procedure _ -> Error.code_error "Byte-extracting a procedure") *)
   | Struct elems ->
       let fields = Ctx.resolve_struct_components ctx expr.type_ in
       (* We start by getting the offsets where we need to write,
