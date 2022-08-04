@@ -10,12 +10,6 @@ let opt_to_int = function
   | None -> 0
   | Some x -> to_int x
 
-let pp fmt = function
-  | Freeable -> Fmt.pf fmt "Freeable"
-  | Writable -> Fmt.pf fmt "Writable"
-  | Readable -> Fmt.pf fmt "Readable"
-  | Nonempty -> Fmt.pf fmt "Nonempty"
-
 module Infix = struct
   let ( >% ), ( <% ), ( <=% ), ( >=% ), ( =% ) =
     let make op a b = op (to_int a) (to_int b) in
@@ -35,6 +29,8 @@ let to_string = function
   | Writable -> "Writable"
   | Readable -> "Readable"
   | Nonempty -> "Nonempty"
+
+let pp ft t = Format.fprintf ft "%s" (to_string t)
 
 let opt_to_string = function
   | None -> "None"

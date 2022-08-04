@@ -9,3 +9,8 @@ let ptr64 () =
   match !archi with
   | Arch64 -> true
   | Arch32 -> false
+
+let ptr_chunk () : Chunk.t =
+  match !archi with
+  | Arch64 -> Int64
+  | Arch32 -> Int32

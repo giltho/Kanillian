@@ -1,17 +1,18 @@
+#internal
+
 spec i__calloc(vnelem, velsize)
-      [[ (vnelem == {{ "long", #n }}) *
-         (velsize == {{ "long", #sz }}) ]]
+      [[ (vnelem == #n) *
+         (velsize == #sz) *
+         (types(#n: Int, #sz: Int)) ]]
       [[ (ret == {{ #loc, 0i }}) *
          types(#loc: Obj) *
          (#bytes == #n i* #sz) *
          <mem_zeros>(#loc, 0i, #bytes; "Freeable") *
-         <mem_single>(#loc, -8i, "int64"; {{ "long", #bytes }}, "Freeable" ) *
+         <mem_single>(#loc, -8i, "int64"; #bytes, "Freeable" ) *
          <mem_bounds>(#loc; {{ -8i, #bytes }}) ]]
       normal
 proc i__calloc(vnelem, velsiz) {
-      nelem := "i__alloc_size"(vnelem);
-      elsiz := "i__alloc_size"(velsiz);
-      sz := nelem i* elsiz;
+      sz := vnelem i* velsiz;
       bl := [mem_alloc](-8i, sz);
       b := l-nth(bl, 0i);
       u := [mem_store]("int64", b, -8i, {{ "long", sz }});

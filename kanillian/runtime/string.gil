@@ -1,6 +1,7 @@
 #internal
 
 proc i__strcmp(str1, str2) {
+      fail[fixme]();
           goto [((typeOf str1) = List) and ((typeOf str2) = List) and
                 ((typeOf (l-nth(str1, 0i))) = Obj) and ((typeOf (l-nth(str2, 0i))) = Obj)]
                 ctn die; (* Check that we have pointers *)
@@ -21,6 +22,7 @@ proc i__strcmp(str1, str2) {
 };
 
 proc i__strlen(str) {
+      fail[fixme]();
           goto [((typeOf str) = List) and ((typeOf (l-nth(str, 0i))) = Obj)]
                 ctn die; (* Check that we have pointers *)
     ctn:  i := 0i;
@@ -35,6 +37,7 @@ proc i__strlen(str) {
 };
 
 proc i__strcpy(str1, str2) {
+      fail[fixme]();
           goto [((typeOf str1) = List) and ((typeOf str2) = List) and
                 ((typeOf (l-nth(str1, 0i))) = Obj) and ((typeOf (l-nth(str2, 0i))) = Obj)]
                 ctn die; (* Check that we have pointers *)

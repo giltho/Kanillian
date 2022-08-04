@@ -1,8 +1,3 @@
-module Gcu = struct
-  include Compcert
-  module Vt = Cgil_lib.ValueTranslation
-end
-
 let assert_unhandled ~feature args =
   let open Gil_syntax in
   let open Stats.Unhandled in

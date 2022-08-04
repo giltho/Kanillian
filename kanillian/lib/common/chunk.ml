@@ -1,5 +1,3 @@
-type ctype = Long | Float | Single | Int
-
 type t =
   | Int8signed
   | Int8unsigned
@@ -31,12 +29,6 @@ let to_string = function
   | Int64 -> "int64"
   | Float32 -> "float32"
   | Float64 -> "float64"
-
-let type_of = function
-  | Int64 -> Long
-  | Float64 -> Float
-  | Int32 | Int16unsigned | Int16signed | Int8unsigned | Int8signed -> Int
-  | Float32 -> Single
 
 let size = function
   | Int8signed | Int8unsigned -> 1

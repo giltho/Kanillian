@@ -1,0 +1,42 @@
+#internal
+
+proc i__malloc(sz) {
+      chunk := "i__ptr_chunk"();
+      ptr_sz := "i__ptr_size"();
+      bl := [mem_alloc](i- ptr_sz, sz);
+      b := l-nth(bl, 0i);
+      u := [mem_store](chunk, b, i- ptr_sz, sz);
+      ret := {{ b, 0i }};
+      return
+};
+
+proc i__free(ptr) {
+         chunk := "i__ptr_chunk"();
+         ptr_sz := "i__ptr_size"();
+         sz := [mem_load](chunk, l-nth(ptr, 0i), l-nth(ptr, 1i) i- ptr_sz);
+         goto [ sz i< 0i ] die ctn;
+   die:  fail[free]("Deallocating a pointer of negative size");
+   ctn:  u := [mem_free](l-nth(ptr, 0i), l-nth(ptr, 1i) i- ptr_sz, l-nth(ptr, 1i) i+ sz);
+         ret := undefined;
+         return
+};
+
+proc i__memmove(ptr1, ptr2, sz) {
+      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), n);
+      return
+};
+
+proc i__memcpy(ptr1, ptr2, sz) {
+      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), n);
+      return
+};
+
+proc i__memset(ptr, vc, n) {
+            n := n i- 1i;
+      loop: goto [not (n i< 0i)] ctn end;
+      ctn:  u := [mem_store]("int8unsigned", l-nth(ptr, 0i), l-nth(ptr, 1i) i+ n, vc);
+            n := n i- 1i;
+            goto loop;
+      end:  ret := ptr;
+            return
+};

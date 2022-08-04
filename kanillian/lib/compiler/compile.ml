@@ -1,6 +1,7 @@
 open Gil_syntax
 module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
+module Mem_interface = Memory_model.Interface
 
 (* let as_pure_string_literal (e : GExpr.t) =
    match e.value with
@@ -264,10 +265,8 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
   let assign_cmd = b @@ Cmd.Assignment (loc, loc_expr) in
   let loc = Expr.PVar loc in
   let drop_perm_cmd =
-    let drom_perm = Cgil_lib.LActions.(str_ac (AMem DropPerm)) in
-    let perm_string =
-      Expr.Lit (String (Gcu.Vt.string_of_permission Nonempty))
-    in
+    let drom_perm = Mem_interface.(str_ac (AMem DropPerm)) in
+    let perm_string = Expr.Lit (String (Perm.to_string Nonempty)) in
     b
     @@ Cmd.LAction
          ("u", drom_perm, [ loc; Expr.zero_i; Expr.int 1; perm_string ])
@@ -280,11 +279,11 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
   in
   let target = Expr.string target in
   let set_symbol_cmd =
-    let set_symbol = Cgil_lib.LActions.(str_ac (AGEnv SetSymbol)) in
+    let set_symbol = Mem_interface.(str_ac (AGEnv SetSymbol)) in
     b @@ Cmd.LAction ("u", set_symbol, [ symexpr; loc ])
   in
   let set_def_cmd =
-    let set_def = Cgil_lib.LActions.(str_ac (AGEnv SetDef)) in
+    let set_def = Mem_interface.(str_ac (AGEnv SetDef)) in
     b
     @@ Cmd.LAction
          ("u", set_def, [ loc; EList [ Lit (String "function"); target ] ])
@@ -334,19 +333,17 @@ let set_global_var ~ctx (gv : Program.Global_var.t) : Body_item.t Seq.t =
           v_init_cmds @ store_value
     in
     let drom_perm_cmd =
-      let drom_perm = Cgil_lib.LActions.(str_ac (AMem DropPerm)) in
-      let perm_string =
-        Expr.Lit (String (Gcu.Vt.string_of_permission Writable))
-      in
+      let drom_perm = Mem_interface.(str_ac (AMem DropPerm)) in
+      let perm_string = Expr.Lit (String (Perm.to_string Writable)) in
       b @@ Cmd.LAction ("u", drom_perm, [ loc; Expr.zero_i; size; perm_string ])
     in
     let symexpr = Expr.Lit (String gv.symbol) in
     let set_symbol_cmd =
-      let set_symbol = Cgil_lib.LActions.(str_ac (AGEnv SetSymbol)) in
+      let set_symbol = Mem_interface.(str_ac (AGEnv SetSymbol)) in
       b @@ Cmd.LAction ("u", set_symbol, [ symexpr; loc ])
     in
     let set_def_cmd =
-      let set_def = Cgil_lib.LActions.(str_ac (AGEnv SetDef)) in
+      let set_def = Mem_interface.(str_ac (AGEnv SetDef)) in
       b
       @@ Cmd.LAction
            ("u", set_def, [ loc; EList [ Lit (String "variable"); symexpr ] ])
@@ -522,9 +519,8 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   in
   assert (Machine_model.equal context.machine Machine_model.archi64);
   let imports =
-    Constants.Imports.imports
-    @ Imports.imports Arch64
-        !Gillian.Utils.Config.current_exec_mode
-        Unallocated_functions
+    Imports.imports Arch64
+      !Gillian.Utils.Config.current_exec_mode
+      Unallocated_functions
   in
   { gil_prog with imports }

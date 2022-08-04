@@ -1,6 +1,0 @@
-(* zero_init doesn't exist in compcert.. *)
-proc i__store_zeros(b, sz) {
-  u := [mem_zeroinit](b, 0i, sz);
-  ret := null;
-  return
-};

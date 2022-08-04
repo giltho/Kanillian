@@ -1,14 +1,8 @@
 (install
- (files binops_archi32_all_exec.gil binops_archi32_bi_exec.gil
-   binops_archi32_non_bi.gil binops_archi64_all_exec.gil
-   binops_archi64_bi_exec.gil binops_archi64_non_bi.gil binops_common.gil
-   internals.gil logic_archi32.gil logic_archi64.gil logic_common.gil
-   stdlib_archi32.gil stdlib_archi32_verif.gil stdlib_archi32_non_verif.gil
-   stdlib_archi64.gil stdlib_archi64_verif.gil stdlib_archi64_non_verif.gil
-   string.gil unops_common.gil global_environment_common.gil
-   global_environment_archi64.gil global_environment_archi32.gil
+ (files archi32_constants.gil archi64_constants.gil
    genv_allocated_functions.gil genv_unallocated_functions.gil
-   global_environment_common_concrete.gil
-   global_environment_common_symbolic.gil cbmc_runtime.gil)
+   global_environment_common.gil internal_binops.gil internal_casts.gil
+   internal_stdlib.gil internals.gil stdlib_non_verif.gil stdlib_verif.gil
+   string.gil)
  (section share)
  (package kanillian))

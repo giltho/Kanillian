@@ -1,5 +1,7 @@
 open Gillian.Utils.ExecMode
 
+let env_path_var = "KANILLIAN_RUNTIME_PATH"
+
 module GEnvConfig = struct
   type t = Allocated_functions | Unallocated_functions
   (* We don't provide a way of making functions allocated for now.
@@ -18,8 +20,6 @@ end
 open GEnvConfig
 open Archi
 
-let env_path_var = "GILLIAN_C_RUNTIME_PATH"
-
 type t = {
   file : string;
   arch : Archi.t list;
@@ -30,10 +30,15 @@ type t = {
 (** All imports, should not be used as such, imports should be selected using the [import] function *)
 let all_imports =
   [
-    (* Common *)
     {
-      file = "unops_common.gil";
-      arch = any_arch;
+      file = "archi32_constants.gil";
+      arch = a32;
+      exec = all_exec;
+      genv_config = any_genv_config;
+    };
+    {
+      file = "archi64_constants.gil";
+      arch = a64;
       exec = all_exec;
       genv_config = any_genv_config;
     };
@@ -50,27 +55,39 @@ let all_imports =
       genv_config = any_genv_config;
     };
     {
-      file = "global_environment_common_concrete.gil";
+      file = "genv_allocated_functions.gil";
       arch = any_arch;
-      exec = concrete_exec;
-      genv_config = any_genv_config;
+      exec = all_exec;
+      genv_config = allocated;
     };
     {
-      file = "global_environment_common_symbolic.gil";
-      arch = any_arch;
-      exec = non_concrete_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_common.gil";
+      file = "internal_casts.gil";
       arch = any_arch;
       exec = all_exec;
       genv_config = any_genv_config;
     };
     {
-      file = "logic_common.gil";
+      file = "internal_binops.gil";
+      arch = any_arch;
+      exec = all_exec;
+      genv_config = any_genv_config;
+    };
+    {
+      file = "internal_stdlib.gil";
+      arch = any_arch;
+      exec = all_exec;
+      genv_config = any_genv_config;
+    };
+    {
+      file = "stdlib_verif.gil";
       arch = any_arch;
       exec = exec_with_preds;
+      genv_config = any_genv_config;
+    };
+    {
+      file = "stdlib_non_verif.gil";
+      arch = any_arch;
+      exec = concrete_exec;
       genv_config = any_genv_config;
     };
     {
@@ -78,117 +95,6 @@ let all_imports =
       arch = any_arch;
       exec = all_exec;
       genv_config = any_genv_config;
-    };
-    (* Arch64 specific *)
-    {
-      file = "stdlib_archi64.gil";
-      arch = a64;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_archi64_verif.gil";
-      arch = a64;
-      exec = ver_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_archi64_non_verif.gil";
-      arch = a64;
-      exec = non_ver_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "global_environment_archi64.gil";
-      arch = a64;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "logic_archi64.gil";
-      arch = a64;
-      exec = exec_with_preds;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi64_all_exec.gil";
-      arch = a64;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi64_non_bi.gil";
-      arch = a64;
-      exec = non_bi_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi64_bi_exec.gil";
-      arch = a64;
-      exec = bi_exec;
-      genv_config = any_genv_config;
-    };
-    (* Arch32 specific *)
-    {
-      file = "stdlib_archi32.gil";
-      arch = a32;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_archi32_verif.gil";
-      arch = a32;
-      exec = ver_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_archi32_non_verif.gil";
-      arch = a32;
-      exec = non_ver_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "global_environment_archi32.gil";
-      arch = a32;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "logic_archi32.gil";
-      arch = a32;
-      exec = exec_with_preds;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi32_all_exec.gil";
-      arch = a32;
-      exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi32_non_bi.gil";
-      arch = a32;
-      exec = non_bi_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "binops_archi32_bi_exec.gil";
-      arch = a32;
-      exec = bi_exec;
-      genv_config = any_genv_config;
-    };
-    (* Global functions *)
-    {
-      file = "genv_allocated_functions.gil";
-      arch = any_arch;
-      exec = all_exec;
-      genv_config = allocated;
-    };
-    {
-      file = "genv_unallocated_functions.gil";
-      arch = any_arch;
-      exec = all_exec;
-      genv_config = unallocated;
     };
   ]
 

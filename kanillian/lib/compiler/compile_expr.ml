@@ -23,6 +23,13 @@ let dummy_access ~ctx type_ =
 
 (* This file is a mess of mutually-recursive functions *)
 
+type binop_comp =
+  | GilBinop of BinOp.t
+  | App of (Expr.t -> Expr.t -> Expr.t)
+  | Proc of string
+  | Then of (binop_comp * (Expr.t -> Expr.t))
+  | Unhandled of [ `With_type | `Without_type ]
+
 let compile_binop
     ~(ctx : Ctx.t)
     ~(lty : GType.t)
@@ -34,126 +41,114 @@ let compile_binop
      then we'll figure out a bit more.
      This is for size_t and pointer operations. *)
   assert (Machine_model.(equal archi64 ctx.machine));
+  let ( ||> ) comp f = Then (comp, f) in
   let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
-    let open Constants.Comp_functions in
     let open Constants.Binop_functions in
     match binop with
     | Equal -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_eq
-        | CInteger I_bool -> `Proc cmpu_eq
-        | CInteger I_size_t -> `Proc cmplu_eq
-        | CInteger I_ssize_t -> `Proc cmpl_eq
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) -> GilBinop BinOp.Equal
+        | CInteger I_size_t | Pointer _ -> Proc eq_maybe_ptr
+        | _ -> Unhandled `With_type)
     | Notequal -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_ne
-        | CInteger I_bool -> `Proc cmpu_ne
-        | CInteger I_size_t -> `Proc cmplu_ne
-        | CInteger I_ssize_t -> `Proc cmpl_ne
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+            GilBinop BinOp.Equal ||> fun e -> Expr.Infix.not e
+        | CInteger I_size_t | Pointer _ -> Proc neq_maybe_ptr
+        | _ -> Unhandled `With_type)
     | IeeeFloatEqual -> (
         match lty with
-        | Float -> `Proc cmpfs_eq
-        | Double -> `Proc cmpf_eq
-        | _ -> `Unhandled `With_type)
+        | Float | Double -> GilBinop Equal
+        | _ -> Unhandled `With_type)
     | IeeeFloatNotequal -> (
         match lty with
-        | Float -> `Proc cmpfs_ne
-        | Double -> `Proc cmpf_ne
-        | _ -> `Unhandled `With_type)
+        | Float | Double -> GilBinop Equal ||> fun e -> Expr.Infix.not e
+        | _ -> Unhandled `With_type)
     | Le -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_le
-        | CInteger I_bool -> `Proc cmpu_le
-        | CInteger I_size_t -> `Proc cmplu_le
-        | CInteger I_ssize_t -> `Proc cmpl_le
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+            GilBinop ILessThanEqual
+        | CInteger I_size_t | Pointer _ -> Proc leq_maybe_ptr
+        | _ -> Unhandled `With_type)
     | Lt -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_lt
-        | CInteger I_bool -> `Proc cmpu_lt
-        | CInteger I_size_t -> `Proc cmplu_lt
-        | CInteger I_ssize_t -> `Proc cmpl_lt
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) -> GilBinop ILessThan
+        | CInteger I_size_t | Pointer _ -> Proc lt_maybe_ptr
+        | _ -> Unhandled `With_type)
     | Gt -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_gt
-        | CInteger I_bool -> `Proc cmpu_gt
-        | CInteger I_size_t -> `Proc cmplu_gt
-        | CInteger I_ssize_t -> `Proc cmpl_gt
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+            GilBinop ILessThanEqual ||> fun e -> Expr.Infix.not e
+        | CInteger I_size_t | Pointer _ -> Proc gt_maybe_ptr
+        | _ -> Unhandled `With_type)
     | Ge -> (
         match lty with
-        | CInteger (I_int | I_char) -> `Proc cmp_ge
-        | CInteger I_bool -> `Proc cmpu_ge
-        | CInteger I_size_t -> `Proc cmplu_ge
-        | CInteger I_ssize_t -> `Proc cmpl_ge
-        | _ -> `Unhandled `With_type)
+        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+            GilBinop ILessThan ||> fun e -> Expr.Infix.not e
+        | CInteger I_size_t | Pointer _ -> Proc geq_maybe_ptr
+        | _ -> Unhandled `With_type)
     | Plus -> (
         match (lty, rty) with
-        | CInteger I_int, CInteger I_int -> `Proc add
-        | CInteger I_bool, CInteger I_bool -> `Proc add
-        | CInteger I_size_t, CInteger I_size_t -> `Proc addl
-        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc addl
-        (* For pointer addition, I'm not checking that the pointer is not null.
-           That's a bug we've caught in the past... *)
-        | CInteger (I_size_t | I_ssize_t), Pointer _ ->
-            `App (fun num ptr -> Memory.ptr_add_v ptr num)
-        | Pointer _, CInteger (I_size_t | I_ssize_t) -> `App Memory.ptr_add_v
-        | _ -> `Unhandled `With_type)
+        | (CInteger I_size_t | Pointer _), (CInteger I_size_t | Pointer _) ->
+            Proc add_maybe_ptr
+        | CInteger I_int, CInteger I_int
+        | CInteger I_char, CInteger I_char
+        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IPlus
+        | _ -> Unhandled `With_type)
     | Mult -> (
         match (lty, rty) with
-        | CInteger I_int, CInteger I_int -> `Proc mul
-        | CInteger I_char, CInteger I_char -> `Proc mul
-        | CInteger I_size_t, CInteger I_size_t -> `Proc mull
-        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc mull
-        | _ -> `Unhandled `With_type)
+        | CInteger I_int, CInteger I_int
+        | CInteger I_char, CInteger I_char
+        | CInteger I_size_t, CInteger I_size_t
+        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop ITimes
+        | _ -> Unhandled `With_type)
     | Mod -> (
         match (lty, rty) with
-        | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
-            `Proc mod_
-        | CInteger I_size_t, CInteger I_size_t -> `Proc modlu
-        | CInteger I_ssize_t, CInteger I_ssize_t -> `Proc modl
+        | CInteger I_int, CInteger I_int
+        | CInteger I_char, CInteger I_char
+        | CInteger I_size_t, CInteger I_size_t
+        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IMod
         | Unsignedbv { width = width_a }, Unsignedbv { width = width_b }
-          when width_a == width_b
-               && (width_a == 8 || width_a == 16 || width_a == 32) -> `Proc modu
-        | _ -> `Unhandled `With_type)
-    | Or -> `GilBinop BinOp.BOr
-    | And -> `GilBinop BinOp.BAnd
+          when width_a == width_b -> GilBinop IMod
+        | _ -> Unhandled `With_type)
+    | Or -> GilBinop BinOp.BOr
+    | And -> GilBinop BinOp.BAnd
     | OverflowPlus -> (
         match (lty, rty) with
         | CInteger I_size_t, CInteger I_size_t
           when match Ctx.archi ctx with
                | Arch64 -> true
-               | _ -> false -> `Proc overflow_plus_u64
+               | _ -> false -> Proc overflow_plus_u64
         | Unsignedbv { width = 64 }, Unsignedbv { width = 64 } ->
-            `Proc overflow_plus_u64
-        | _ -> `Unhandled `With_type)
-    | _ -> `Unhandled `No_type
+            Proc overflow_plus_u64
+        | _ -> Unhandled `With_type)
+    | _ -> Unhandled `Without_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
-  match compile_with with
-  | `Proc internal_function ->
-      let gvar = Ctx.fresh_v ctx in
-      let call =
-        Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
-      in
-      Cs.return ~app:[ call ] (Expr.PVar gvar)
-  | `App f -> Cs.return (f e1 e2)
-  | `GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
-  | `Unhandled wt ->
-      let type_info =
-        match wt with
-        | `With_type -> Some (lty, rty)
-        | `No_type -> None
-      in
-      let cmd =
-        Helpers.assert_unhandled ~feature:(BinOp (binop, type_info)) []
-      in
-      Cs.return ~app:[ cmd ] (Expr.Lit Nono)
+  let rec compute = function
+    | Then (b, f) -> Cs.map f (compute b)
+    | Proc internal_function ->
+        let gvar = Ctx.fresh_v ctx in
+        let call =
+          Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
+        in
+        Cs.return ~app:[ call ] (Expr.PVar gvar)
+    | App f -> Cs.return (f e1 e2)
+    | GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
+    | Unhandled wt ->
+        let type_info =
+          match wt with
+          | `With_type -> Some (lty, rty)
+          | `Without_type -> None
+        in
+        let cmd =
+          Helpers.assert_unhandled ~feature:(BinOp (binop, type_info)) []
+        in
+        Cs.return ~app:[ cmd ] (Expr.Lit Nono)
+  in
+  compute compile_with
 
 let fresh_sv ctx =
   let v = Ctx.fresh_v ctx in
@@ -162,64 +157,14 @@ let fresh_sv ctx =
 
 let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   let open Cs.Syntax in
+  (* TODO: I should probably be assuming the *)
   match type_ with
-  | CInteger ty ->
-      let open Cgil_lib.CConstants.VTypes in
-      let str_constr =
-        match ty with
-        | I_int | I_char | I_bool -> int_type
-        | I_size_t | I_ssize_t ->
-            if Ctx.archi ctx == Arch64 then long_type else int_type
-      in
-      let* value = fresh_sv ctx in
-      let value = Expr.PVar value in
-      let assume_list =
-        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
-        Cmd.Logic (Assume f)
-      in
-      let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
-      Cs.unit [ assume_list; assume_int ]
-  | (Signedbv { width } | Unsignedbv { width })
-    when width == 8 || width == 16 || width == 32 ->
-      let str_constr = Cgil_lib.CConstants.VTypes.int_type in
-      let* value = fresh_sv ctx in
-      let value = Expr.PVar value in
-      let assume_list =
-        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
-        Cmd.Logic (Assume f)
-      in
-      let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
-      Cs.unit [ assume_list; assume_int ]
-  | (Signedbv { width } | Unsignedbv { width }) when width == 64 ->
-      let str_constr = Cgil_lib.CConstants.VTypes.long_type in
-      let* value = fresh_sv ctx in
-      let value = Expr.PVar value in
-      let assume_list =
-        let f = Formula.Eq (expr, EList [ Lit (String str_constr); value ]) in
-        Cmd.Logic (Assume f)
-      in
-      let assume_int = Cmd.Logic (AssumeType (value, IntType)) in
-      Cs.unit [ assume_list; assume_int ]
-  | Double ->
-      let open Cgil_lib.CConstants.VTypes in
-      let* value = fresh_sv ctx in
-      let value = Expr.PVar value in
-      let assume_list =
-        let f = Formula.Eq (expr, EList [ Lit (String float_type); value ]) in
-        Cmd.Logic (Assume f)
-      in
-      let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
-      Cs.unit [ assume_list; assume_num ]
-  | Float ->
-      let open Cgil_lib.CConstants.VTypes in
-      let* value = fresh_sv ctx in
-      let value = Expr.PVar value in
-      let assume_list =
-        let f = Formula.Eq (expr, EList [ Lit (String single_type); value ]) in
-        Cmd.Logic (Assume f)
-      in
-      let assume_num = Cmd.Logic (AssumeType (value, NumberType)) in
-      Cs.unit [ assume_list; assume_num ]
+  | CInteger _ | Signedbv _ | Unsignedbv _ ->
+      let assume_int = Cmd.Logic (AssumeType (expr, IntType)) in
+      Cs.unit [ assume_int ]
+  | Double | Float ->
+      let assume_num = Cmd.Logic (AssumeType (expr, NumberType)) in
+      Cs.unit [ assume_num ]
   | Pointer _ ->
       let* loc = fresh_sv ctx in
       let* ofs = fresh_sv ctx in
@@ -235,18 +180,7 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   | Bool ->
       let assume_bool = Cmd.Logic (AssumeType (expr, BooleanType)) in
       Cs.unit [ assume_bool ]
-  | StructTag tag | UnionTag tag | Struct { tag; _ } | Union { tag; _ } ->
-      (* TODO: Add a signal here for something unhandled! *)
-      let fail =
-        assert_unhandled ~feature:(CompositNondet type_) [ Lit (String tag) ]
-      in
-      Cs.unit [ fail ]
-  | _ ->
-      let ty_str = GType.show type_ in
-      let fail =
-        assert_unhandled ~feature:(CompositNondet type_) [ Lit (String ty_str) ]
-      in
-      Cs.unit [ fail ]
+  | _ -> Error.code_error "Unreachable: assume_type for non-scalar"
 
 let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
   let b = Body_item.make_hloc ~loc in
@@ -378,33 +312,31 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     match (from, into) with
     | x, y when GType.equal x y -> `Nop
     | Bool, CInteger (I_bool | I_char | I_int) ->
-        `Proc Cgil_lib.CConstants.Internal_Functions.val_of_bool
+        `Proc Constants.Internal_functions.val_of_bool
     | CInteger I_int, CInteger (I_size_t | I_ssize_t) ->
         assert (ctx.machine.pointer_width == 64);
-        `Proc Cgil_lib.CConstants.UnOp_Functions.longofint
+        (* FIXME: This is incorrect, some mathematical operation should be done *)
+        `Nop
     | Unsignedbv { width = 32 }, CInteger I_ssize_t -> (
         match Ctx.archi ctx with
         | Arch32 -> `Proc Constants.Cast_functions.unsign_int
-        | Arch64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
+        | Arch64 -> `Nop)
     | CInteger I_int, Unsignedbv { width } when ctx.machine.int_width == width
       -> `Proc Constants.Cast_functions.unsign_int
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 64
-      -> `Proc Constants.Cast_functions.unsign_long
+      -> `Proc Constants.Cast_functions.unsign_int
     | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
       -> `Proc Constants.Cast_functions.unsign_int
     | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 64
-      -> `Proc Constants.Cast_functions.sign_long
+      -> `Proc Constants.Cast_functions.sign_int
     | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 32
       -> `Proc Constants.Cast_functions.sign_int
-    | Unsignedbv { width = 8 | 16 }, CInteger (I_size_t | I_ssize_t) -> (
-        (* We're only considering archi32 and 64, u8 and u16 are
-           guaranteed to fit inside size_t and ssize_t *)
-        match Ctx.archi ctx with
-        | Arch32 -> `Nop
-        | Arch64 -> `Proc Cgil_lib.CConstants.UnOp_Functions.longofint)
+    | Unsignedbv { width = 8 | 16 }, CInteger (I_size_t | I_ssize_t) -> `Nop
+    (* We're only considering archi32 and 64, u8 and u16 are
+       guaranteed to fit inside size_t and ssize_t *)
     | Pointer _, Pointer _ -> `Nop
     | Pointer _, CInteger I_size_t ->
-        (* One cool thing is that, in c#m, size_t and pointer is the same type. *)
+        (* One cool thing is that size_t and pointer is the same chunk. *)
         `Nop
     | _ -> `Unhandled
   in
@@ -495,27 +427,10 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
               Cs.return ~app:[ cmd ] (Expr.Lit Nono)
           | _ -> Error.code_error "Array access is not in-memory-composit"
         in
-        let sz =
-          let sz_i = Ctx.size_of ctx lvalue.type_ in
-          let ty =
-            let open Cgil_lib.CConstants.VTypes in
-            match Ctx.archi ctx with
-            | Arch32 -> int_type
-            | Arch64 -> long_type
-          in
-          Expr.EList [ Lit (String ty); Expr.int sz_i ]
-        in
-        let* offset =
-          let mult =
-            match Ctx.archi ctx with
-            | Arch32 -> Constants.Binop_functions.mul
-            | Arch64 -> Constants.Binop_functions.mull
-          in
-          let res = Ctx.fresh_v ctx in
-          let call =
-            Cmd.Call (res, Lit (String mult), [ index; sz ], None, None)
-          in
-          Cs.return ~app:[ b call ] (Expr.list_nth (Expr.PVar res) 1)
+        let sz = Expr.int (Ctx.size_of ctx lvalue.type_) in
+        let offset =
+          let open Expr.Infix in
+          index * sz
         in
         let ptr = Memory.ptr_add_e ptr offset in
         if Ctx.representable_in_store ctx lvalue.type_ then
@@ -575,7 +490,7 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         if cast_to_bool then
           let temp = Ctx.fresh_v ctx in
           let bool_of_value =
-            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
+            Expr.Lit (String Constants.Internal_functions.bool_of_val)
           in
           let call =
             Cmd.Call (temp, bool_of_value, [ to_assume ], None, None)
@@ -616,7 +531,7 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         if cast_to_bool then
           let temp = Ctx.fresh_v ctx in
           let bool_of_value =
-            Expr.Lit (String Cgil_lib.CConstants.Internal_Functions.bool_of_val)
+            Expr.Lit (String Constants.Internal_functions.bool_of_val)
           in
           let call =
             Cmd.Call (temp, bool_of_value, [ to_assert ], None, None)
@@ -751,9 +666,7 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
             Cs.return (Val_repr.Procedure (Expr.string sym))
         | InMemoryFunction { ptr; symbol = None } ->
             let symbol = Ctx.fresh_v ctx in
-            let get_name =
-              Cgil_lib.CConstants.Internal_Functions.get_function_name
-            in
+            let get_name = Constants.Internal_functions.get_function_name in
             let call =
               Cmd.Call (symbol, Lit (String get_name), [ ptr ], None, None)
             in
@@ -775,40 +688,13 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       | Direct x -> Error.code_error ("address of direct access to " ^ x))
   | BoolConstant b -> by_value (Lit (Bool b))
   | CBoolConstant b ->
-      let i = if b then Gcu.Camlcoq.Z.one else Gcu.Camlcoq.Z.zero in
-      let lit = Gcu.Vt.gil_of_compcert (Gcu.Values.Vint i) in
-      by_value (Lit lit)
+      let z = if b then Z.one else Z.zero in
+      by_value (Lit (Int z))
   | PointerConstant b ->
-      let i = Gcu.Camlcoq.Z.of_sint b in
-      let v =
-        match Ctx.archi ctx with
-        | Arch32 -> Gcu.Values.Vint i
-        | Arch64 -> Gcu.Values.Vlong i
-      in
-      let lit = Gcu.Vt.gil_of_compcert v in
-      by_value (Lit lit)
-  | IntConstant z ->
-      let cz = Gcu.Vt.z_of_int z in
-      let ccert_value =
-        let open Gcu.Values in
-        match expr.type_ with
-        | CInteger (I_int | I_char | I_bool) -> Vint cz
-        | CInteger (I_size_t | I_ssize_t) -> (
-            match Ctx.archi ctx with
-            | Arch32 -> Vint cz
-            | Arch64 -> Vlong cz)
-        | Unsignedbv { width } | Signedbv { width } ->
-            if width <= 32 then Vint cz else Vlong cz
-        | _ -> Error.unexpected "IntConstant with non-int type"
-      in
-      let lit = Gcu.Vt.gil_of_compcert ccert_value in
-      by_value (Lit lit)
-  | DoubleConstant f ->
-      let typ = Cgil_lib.CConstants.VTypes.float_type in
-      by_value (Lit (LList [ String typ; Num f ]))
-  | FloatConstant f ->
-      let typ = Cgil_lib.CConstants.VTypes.single_type in
-      by_value (Lit (LList [ String typ; Num f ]))
+      let z = Z.of_int b in
+      by_value (Lit (Int z))
+  | IntConstant z -> by_value (Lit (Int z))
+  | DoubleConstant f | FloatConstant f -> by_value (Lit (Num f))
   | BinOp { op; lhs; rhs } ->
       let* e1 = compile_expr lhs in
       let* e2 = compile_expr rhs in

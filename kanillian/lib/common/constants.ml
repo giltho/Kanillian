@@ -3,19 +3,18 @@ module Internal_functions = struct
   let calloc = "i__calloc"
   let memmove = "i__memmove"
   let store_zeros = "i__store_zeros"
+  let loadv = "i__loadv"
+  let storev = "i__storev"
+  let get_function_name = "i__get_function_name"
+  let ef_memcpy = "i__ef_memcpy"
+  let val_of_bool = "i__value_of_bool"
+  let bool_of_val = "i__bool_of_value"
 
   let hook = function
     | "malloc" -> Some malloc
     | "calloc" -> Some calloc
     | "memmove" -> Some memmove
     | _ -> None
-end
-
-module VTypes = struct
-  let int_type = "int"
-  let long_type = "long"
-  let single_type = "single"
-  let float_type = "float"
 end
 
 module CBMC_names = struct
@@ -28,61 +27,21 @@ module Kanillian_names = struct
   let ret_label = "ret"
 end
 
-module Comp_functions = struct
-  let cmpl_le = "i__cbmc_binop_cmpl_le"
-  let cmpl_ge = "i__cbmc_binop_cmpl_ge"
-  let cmpl_lt = "i__cbmc_binop_cmpl_lt"
-  let cmpl_eq = "i__cbmc_binop_cmpl_eq"
-  let cmpl_ne = "i__cbmc_binop_cmpl_ne"
-  let cmpl_gt = "i__cmbc_binop_cmpl_gt"
-  let cmpu_le = "i__cbmc_binop_cmpu_le"
-  let cmpu_gt = "i__cbmc_binop_cmpu_gt"
-  let cmpu_ne = "i__cbmc_binop_cmpu_ne"
-  let cmpu_eq = "i__cbmc_binop_cmpu_eq"
-  let cmpu_ge = "i__cbmc_binop_cmpu_ge"
-  let cmplu_le = "i__cbmc_binop_cmplu_le"
-  let cmplu_eq = "i__cbmc_binop_cmplu_eq"
-  let cmplu_ne = "i__cbmc_binop_cmplu_ne"
-  let cmplu_ge = "i__cbmc_binop_cmplu_ge"
-  let cmplu_lt = "i__cbmc_binop_cmplu_lt"
-  let cmplu_gt = "i__cbmc_binop_cmplu_gt"
-  let cmpfs_ge = "i__cbmc_binop_cmpfs_ge"
-  let cmpfs_le = "i__cbmc_binop_cmpfs_le"
-  let cmpfs_eq = "i__cbmc_binop_cmpfs_eq"
-  let cmpfs_ne = "i__cbmc_binop_cmpfs_ne"
-  let cmpf_eq = "i__cbmc_binop_cmpf_eq"
-  let cmpf_ne = "i__cbmc_binop_cmpf_ne"
-  let cmp_gt = "i__cbmc_binop_cmp_gt"
-  let cmp_ge = "i__cbmc_binop_cmp_ge"
-  let cmp_lt = "i__cbmc_binop_cmp_lt"
-  let cmpu_lt = "i__cbmc_binop_cmpu_lt"
-  let cmp_le = "i__cbmc_binop_cmp_le"
-  let cmp_eq = "i__cbmc_binop_cmp_eq"
-  let cmp_ne = "i__cbmc_binop_cmp_ne"
-end
-
 module Binop_functions = struct
-  let addl = "i__cbmc_binop_addl"
-  let mull = "i__cbmc_binop_mull"
-  let add = "i__binop_add"
-  let mul = "i__binop_mul"
-  let mod_ = "i__binop_mod"
-  let modlu = "i__binop_modlu"
-  let modl = "i__binop_modl"
-  let modu = "i__binop_modu"
-  let overflow_plus_u64 = "i__cbmc_binop_overflow_plus_u64"
+  let eq_maybe_ptr = "i__binop_equal_maybe_ptr"
+  let neq_maybe_ptr = "i__binop_notequal_maybe_ptr"
+  let gt_maybe_ptr = "i__binop_greaterthan_maybe_ptr"
+  let lt_maybe_ptr = "i__binop_lowerthan_maybe_ptr"
+  let geq_maybe_ptr = "i__binop_greatereq_maybe_ptr"
+  let leq_maybe_ptr = "i__binop_lesseq_maybe_ptr"
+  let add_maybe_ptr = "i__binop_add_maybe_ptr"
+  let sub_maybe_ptr = "i__binop_sub_maybe_ptr"
+  let overflow_plus_u64 = "i__binop_overflow_plus_u64"
 end
 
 module Cast_functions = struct
-  let unsign_int = "i__cbmc_unsign_int"
-  let unsign_long = "i__cbmc_unsign_long"
+  let unsign_int = "i__cast_unsign_int"
   let sign_int = "i__cbmc_sign_int"
-  let sign_long = "i__cbmc_sign_long"
-end
-
-module Imports = struct
-  let env_path_var = "KANILLIAN_RUNTIME_PATH"
-  let imports = [ ("cbmc_runtime.gil", false) ]
 end
 
 module Internal_Predicates = struct

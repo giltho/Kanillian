@@ -8,7 +8,6 @@ open Gillian.Symbolic
 open Gillian.Gil_syntax
 module Logging = Gillian.Logging
 module SS = GUtils.Containers.SS
-module SVal = MonadicSVal
 module GEnv = GEnv.Symbolic
 
 (* Some utils first *)
@@ -215,11 +214,7 @@ module Mem = struct
     let last_op = LastOp.GetArray (loc_name, ofs, size, chunk) in
     let open Formula.Infix in
     if%sat size #<= (Expr.int 0) then
-      DR.ok
-        ( make ~last_op map,
-          loc_name,
-          MonadicSVal.SVArray.empty,
-          Some Perm.Freeable )
+      DR.ok (make ~last_op map, loc_name, SVal.SVArray.empty, Some Perm.Freeable)
     else
       let** tree = get_tree_res map loc_name in
       let++ sarr, perm, new_tree =
@@ -582,8 +577,8 @@ let execute_store heap params =
   let open DR.Syntax in
   match params with
   | [ Expr.Lit (String chunk_name); loc; ofs; value ] ->
-      let* sval = SVal.of_gil_expr_exn value in
       let chunk = Chunk.of_string chunk_name in
+      let* sval = SVal.of_chunk_and_expr chunk value in
       let++ mem = Mem.store heap.mem loc chunk ofs sval in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "store" params
@@ -664,7 +659,7 @@ let execute_set_single heap params =
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let* sval = SVal.of_gil_expr_exn sval_e in
+      let* sval = SVal.of_chunk_and_expr chunk sval_e in
       let++ mem = Mem.set_single heap.mem loc ofs chunk sval perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params
@@ -688,7 +683,7 @@ let execute_get_array heap params =
       in
       let loc_e = expr_of_loc_name loc_name in
       let range = SHeapTree.Range.of_low_chunk_and_size ofs chunk size in
-      let* array_e = MonadicSVal.SVArray.to_gil_expr ~chunk ~range array in
+      let* array_e = SVal.SVArray.to_gil_expr ~chunk ~range array in
       let perm_string = Perm.opt_to_string perm in
       DR.ok
         (make_branch ~heap:{ heap with mem }
@@ -717,7 +712,7 @@ let execute_set_array heap params =
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let arr = MonadicSVal.SVArray.of_gil_expr_exn arr_e in
+      let arr = SVal.SVArray.of_gil_expr_exn arr_e in
       let++ mem = Mem.set_array heap.mem loc ofs size chunk arr perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params

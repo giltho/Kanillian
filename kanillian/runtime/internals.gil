@@ -1,80 +1,40 @@
 #internal
 
 proc i__storev(chunk, vptr, v) {
-       goto [((typeOf vptr) = List) and (l-len vptr = 2i) and ((typeOf (l-nth(vptr, 0i))) = Obj) and ((typeOf (l-nth(vptr, 1i))) = Int)] ctn sgf;
+       goto [(typeOf vptr) = List] ctn sgf;
   ctn: u := [mem_store](chunk, l-nth(vptr, 0i), l-nth(vptr, 1i), v);
        ret := undefined;
        return;
-  sgf: ret := "segmentation fault";
-       assert (False)
+  sgf: assert (False)
 };
 
 proc i__loadv(chunk, vptr) {
-       goto [((typeOf vptr) = List) and (l-len vptr = 2i) and ((typeOf (l-nth(vptr, 0i))) = Obj) and ((typeOf (l-nth(vptr, 1i))) = Int)] ctn sgf;
+       goto [(typeOf vptr) = List] ctn sgf;
   ctn: vload := [mem_load](chunk, l-nth(vptr, 0i), l-nth(vptr, 1i));
        ret := l-nth(vload, 0i);
        return;
-  sgf: ret := "segmentation fault";
-       assert (False)
-};
-
-proc i__free_list_aux(l, n) {
-           goto [ n i< l-len l ] ctn end;
-      ctn: curr := l-nth(l, n);
-           u := [mem_free](l-nth(curr, 0i), l-nth(curr, 1i), l-nth(curr, 2i));
-           u := "i__free_list_aux"(l, n i+ 1i);
-      end: ret := null;
-           return
-};
-
-proc i__free_list(l) {
-      u := "i__free_list_aux"(l, 0i);
-      ret := undefined;
-      return
+  sgf: assert (False)
 };
 
 
 proc i__value_of_bool(v) {
           goto [v] tr fl;
-      tr: ret := {{ "int", 1i }};
+      tr: ret := 1i;
           return;
-      fl: ret := {{ "int", 0i }};
+      fl: ret := 0i;
           return
 };
 
 proc i__bool_of_value(v) {
-            goto [ l-nth(v, 0i) = "int" ] int unde;
-      int:  goto [ l-nth(v, 1i) = 0i ] fl tr;
+            goto [ v = 0i ] fl oth;
       fl:   ret := false;
             return;
+      oth:  goto [ v = 1i ] tr unde;
       tr:   ret := true;
             return;
       unde: fail[operator]("Not a boolean value")
 };
 
-proc i__neg_bool_value(v) {
-            goto [ l-nth(v, 0i) = "int" ] int unde;
-      int:  goto [ l-nth(v, 1i) = 0i ] fl tr;
-      fl:   ret := {{ "int", 1i }};
-            return;
-      tr:   ret := {{ "int", 0i }};
-            return;
-      unde: fail[operator]("Cannot neg a non-boolean")
-};
-
-proc i__greater_perm(perma, permb) {
-            goto [
-                (permb = "None")
-            or ((permb = "Nonempty") and ((perma = "Nonempty") or (perma = "Readable") or (perma = "Writable") or (perma = "Freeable")))
-            or ((permb = "Readable") and ((perma = "Readable") or (perma = "Writable") or (perma = "Freeable")))
-            or ((permb = "Writable") and ((perma = "Writable") or (perma = "Freeable")))
-            or ((permb = "Freeable") and (perma = "Freeable"))
-            ] yes no;
-      yes:  ret := true;
-            return;
-      no:   ret := false;
-            return
-};
 
 
 proc i__has_cur_perm(b, o, perm) {

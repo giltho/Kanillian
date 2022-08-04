@@ -165,11 +165,6 @@ let is_function_symbol ctx s =
 let type_equal ctx ta tb =
   Type.equal (resolve_type ctx ta) (resolve_type ctx tb)
 
-let ptr_ctype ctx =
-  match archi ctx with
-  | Arch32 -> Chunk.Int
-  | Arch64 -> Chunk.Long
-
 let ptr_chunk ctx =
   match archi ctx with
   | Arch32 -> Chunk.Int32

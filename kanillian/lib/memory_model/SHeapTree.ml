@@ -3,8 +3,6 @@ open Monadic
 module DR = Delayed_result
 module DO = Delayed_option
 module SS = Utils.Containers.SS
-module NSVal = SVal
-module SVal = MonadicSVal
 module SVArr = SVal.SVArray
 module CoreP = Predicates.Core
 
@@ -27,8 +25,8 @@ let pp_err fmt = function
   | UseAfterFree -> Fmt.pf fmt "Use After Free"
   | BufferOverrun -> Fmt.pf fmt "Buffer Overrun"
   | InsufficientPermission { required; actual } ->
-      Fmt.pf fmt "Insufficient Permision: Got %a but required %a" Perm.pp
-        required Perm.pp actual
+      Fmt.pf fmt "Insufficient Permision: Got %s but required %s"
+        (Perm.to_string required) (Perm.to_string actual)
   | InvalidAlignment { alignment; offset } ->
       Fmt.pf fmt "Invalid alignment: %d should divide %a" alignment Expr.pp
         offset
@@ -405,33 +403,23 @@ module Node = struct
         let+ decoded = decode_bytes_to_unsigned_int ~chunk values 8 in
         Ok (decoded, exact_perm)
     | MemVal { mem_val = Array { chunk = chunk_b; values }; exact_perm; _ }
-      when Chunk.equal chunk chunk_b ->
+      when Chunk.equal chunk chunk_b -> (
         let* values = SVArr.reduce values in
-        if Chunk.equal chunk Chunk.ptr then
-          match values with
-          | AllZeros -> DR.ok (SVal.zero_of_chunk chunk, exact_perm)
-          | Arr (EList [ a ]) -> (
-              let obj = SVal.Patterns.obj in
-              let integer = SVal.Patterns.integer in
-              match%ent a with
-              | integer ->
-                  let v =
-                    if Kconfig.ptr64 () then SVal.SVlong a else SVal.SVint a
-                  in
-                  DR.ok (v, exact_perm)
-              | obj -> (
-                  let* value = SVal.of_gil_expr a in
-                  match value with
-                  | Some value -> DR.ok (value, exact_perm)
-                  | None -> failwith "Look here, something's wrong")
-              | _ -> DR.ok (SVal.SUndefined, exact_perm))
-          | _ -> DR.ok (SVal.SUndefined, exact_perm)
-        else
-          let+ single =
-            DO.value ~default:SVal.SUndefined
-              (SVArr.to_single_value ~chunk values)
-          in
-          Ok (single, exact_perm)
+        match values with
+        | AllZeros -> DR.ok (SVal.zero_of_chunk chunk, exact_perm)
+        | Arr (EList [ a ]) ->
+            let* sval = SVal.of_chunk_and_expr chunk a in
+            DR.ok (sval, exact_perm)
+        | AllUndef -> DR.ok (SVal.SUndefined, exact_perm)
+        | Arr l ->
+            let* () =
+              let open Formula.Infix in
+              Delayed.assert_
+                (Expr.list_length l) #== (Expr.int 1)
+                (Failure "Not an array")
+            in
+            let* sval = SVal.of_chunk_and_expr chunk (Expr.list_nth l 0) in
+            DR.ok (sval, exact_perm))
     | MemVal { mem_val = Array { chunk = _; _ }; exact_perm; _ } ->
         DR.ok (SVal.SUndefined, exact_perm)
 
@@ -493,21 +481,20 @@ module Node = struct
     | MemVal { mem_val = Array _; exact_perm; _ } ->
         DR.ok (SVArr.AllUndef, exact_perm)
 
-  let encode ~(perm : Perm.t) ~(chunk : Chunk.t) (sval : SVal.t) =
+  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) =
     let mem_val =
-      match (sval, chunk) with
-      | ( SVint _,
-          (Int8signed | Int8unsigned | Int16signed | Int16unsigned | Int32) )
-      | SVlong _, Int64
-      | SVsingle _, Float32
-      | SVfloat _, Float64 -> Single { chunk; value = sval }
-      | Sptr _, c when Chunk.equal c Chunk.ptr -> Single { chunk; value = sval }
+      match sval with
+      | SVint (_, chunkv) when Chunk.equal chunk chunkv ->
+          Single { chunk; value = sval }
+      | SVfloat (_, `Double) when Chunk.equal chunk Float64 ->
+          Single { chunk = Float64; value = sval }
+      | SVfloat (_, `Single) -> Single { chunk = Float32; value = sval }
+      | Sptr _ -> Single { chunk = Kconfig.ptr_chunk (); value = sval }
       | _ -> Single { chunk; value = SUndefined }
     in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
   let encode_arr ~(perm : Perm.t) ~(chunk : Chunk.t) (sarr : SVArr.t) =
-    (* FIXME: this is probably wrong *)
     let mem_val = Array { chunk; values = sarr } in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
@@ -1089,7 +1076,7 @@ module Tree = struct
     | MemVal { mem_val = Zeros; exact_perm = perm; _ } ->
         [ CoreP.zeros ~loc ~low ~high ~perm ]
     | MemVal { mem_val = Single { chunk; value }; exact_perm = perm; _ } ->
-        let sval, types = NSVal.to_gil_expr value in
+        let sval, types = SVal.to_gil_expr_undelayed value in
         let types =
           List.map
             (let open Formula.Infix in

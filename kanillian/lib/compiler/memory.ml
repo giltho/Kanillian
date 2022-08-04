@@ -1,6 +1,6 @@
 open Gil_syntax
 module GType = Goto_lib.Type
-module LActions = Cgil_lib.LActions
+module Interface = Memory_model.Interface
 
 type chunk =
   | Int8signed
@@ -66,7 +66,7 @@ let ptr_add_v p v =
 (* Allocates the memory with the right size, and
    returns a location expression, addressing the block *)
 let alloc ~loc_var ~size : Expr.t * string Cmd.t =
-  let alloc = Cgil_lib.LActions.(str_ac (AMem Alloc)) in
+  let alloc = Interface.(str_ac (AMem Alloc)) in
   let cmd = Cmd.LAction (loc_var, alloc, [ Expr.zero_i; Expr.int size ]) in
   let loc = Expr.list_nth (PVar loc_var) 0 in
   (loc, cmd)
@@ -91,7 +91,7 @@ let alloc_temp ~ctx ~location ty : Expr.t Cs.with_cmds =
 let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
   if not (Ctx.in_memory ctx l.symbol) then
     Error.code_error "dealloc_local: local is not in memory";
-  let free = Cgil_lib.LActions.(str_ac (AMem Free)) in
+  let free = Interface.(str_ac (AMem Free)) in
   let size = Ctx.size_of ctx l.type_ |> Expr.int in
   let var = Ctx.fresh_v ctx in
   let cmd =
@@ -119,7 +119,7 @@ let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
         | Some var -> var
         | None -> Ctx.fresh_v ctx
       in
-      let loadv = Cgil_lib.CConstants.Internal_Functions.loadv in
+      let loadv = Constants.Internal_functions.loadv in
       let load_cmd =
         Cmd.Call (var, Lit (String loadv), [ chunk; e ], None, None)
       in
@@ -136,7 +136,7 @@ let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
         | Some var -> var
         | None -> Ctx.fresh_v ctx
       in
-      let storev = Cgil_lib.CConstants.Internal_Functions.storev in
+      let storev = Constants.Internal_functions.storev in
       let store_cmd =
         Cmd.Call (var, Lit (String storev), [ chunk; p; v ], None, None)
       in
@@ -145,7 +145,7 @@ let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
 let memcpy ~ctx ~(type_ : GType.t) ~(dst : Expr.t) ~(src : Expr.t) =
   let temp = Ctx.fresh_v ctx in
   let size = Ctx.size_of ctx type_ in
-  let memcpy = Cgil_lib.CConstants.Internal_Functions.ef_memcpy in
+  let memcpy = Constants.Internal_functions.ef_memcpy in
   (* TODO: emit a signal that alignment check is not performed correctly *)
   Cmd.Call
     ( temp,

@@ -49,16 +49,10 @@ val get_array :
   Expr.t ->
   Expr.t ->
   Chunk.t ->
-  (MonadicSVal.SVArray.t * Perm.t option * t) d_or_error
+  (SVal.SVArray.t * Perm.t option * t) d_or_error
 
 val set_array :
-  t ->
-  Expr.t ->
-  Expr.t ->
-  Chunk.t ->
-  MonadicSVal.SVArray.t ->
-  Perm.t ->
-  t d_or_error
+  t -> Expr.t -> Expr.t -> Chunk.t -> SVal.SVArray.t -> Perm.t -> t d_or_error
 
 val get_hole : t -> Expr.t -> Expr.t -> (t * Perm.t option) d_or_error
 val set_hole : t -> Expr.t -> Expr.t -> Perm.t -> t d_or_error
@@ -85,7 +79,7 @@ val assertions : loc:string -> t -> Asrt.t list
 val substitution :
   le_subst:(Expr.t -> Expr.t) ->
   sval_subst:(SVal.t -> SVal.t) ->
-  svarr_subst:(MonadicSVal.SVArray.t -> MonadicSVal.SVArray.t) ->
+  svarr_subst:(SVal.SVArray.t -> SVal.SVArray.t) ->
   t ->
   t
 

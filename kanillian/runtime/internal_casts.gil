@@ -1,0 +1,10 @@
+proc i__cast_unsign_int(v1) {
+    assert (0i i<=# v1); (* It has to not overflow *)
+    ret := v1;
+    return
+};
+
+proc i__cast_sign_int(v1) {
+  ret := v1;
+  return
+};
