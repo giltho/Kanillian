@@ -145,7 +145,10 @@ let with_entering_body ctx ~body ~params ~location =
   { ctx with in_memory; locals; fresh_v; allocated_temps }
 
 let archi ctx : Archi.t =
-  Archi.of_pointer_width ctx.machine.Machine_model.pointer_width
+  match ctx.machine.Machine_model.pointer_width with
+  | 32 -> Arch32
+  | 64 -> Arch64
+  | _ -> Error.unexpected "Unknown pointer width"
 
 let with_break ctx lab f =
   let ctx = { ctx with break_lab = Some lab } in
@@ -161,3 +164,18 @@ let is_function_symbol ctx s =
 
 let type_equal ctx ta tb =
   Type.equal (resolve_type ctx ta) (resolve_type ctx tb)
+
+let ptr_ctype ctx =
+  match archi ctx with
+  | Arch32 -> Chunk.Int
+  | Arch64 -> Chunk.Long
+
+let ptr_chunk ctx =
+  match archi ctx with
+  | Arch32 -> Chunk.Int32
+  | Arch64 -> Chunk.Int64
+
+let ptr_64 ctx =
+  match archi ctx with
+  | Arch32 -> false
+  | Arch64 -> true

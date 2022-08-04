@@ -50,7 +50,7 @@ let of_chunk_and_expr chunk e =
   | Expr.Lit Undefined -> return SUndefined
   | _ -> (
       match Chunk.type_of chunk with
-      | Tlong when Compcert.Archi.ptr64 -> (
+      | Long when Kconfig.ptr64 () -> (
           match%ent e with
           | integer -> return (SVlong e)
           | obj -> (
@@ -60,7 +60,7 @@ let of_chunk_and_expr chunk e =
                   Fmt.failwith
                     "of_chunk_and_expr: Not a location, but should be: %a"
                     Expr.pp e))
-      | Tint when not Compcert.Archi.ptr64 -> (
+      | Int when not (Kconfig.ptr64 ()) -> (
           match%ent e with
           | integer -> return (SVint e)
           | obj -> (
@@ -70,19 +70,18 @@ let of_chunk_and_expr chunk e =
                   Fmt.failwith
                     "of_chunk_and_expr: Not a location, but should be: %a"
                     Expr.pp e))
-      | Tlong -> return (SVlong e)
-      | Tint ->
+      | Long -> return (SVlong e)
+      | Int ->
           let open Formula.Infix in
           let i k = Expr.int k in
           let learned =
             match chunk with
-            | Mint8unsigned -> [ (i 0) #<= e; e #<= (i 255) ]
+            | Int8unsigned -> [ (i 0) #<= e; e #<= (i 255) ]
             | _ -> []
           in
           return ~learned (SVint e)
-      | Tfloat -> return (SVfloat e)
-      | Tsingle -> return (SVsingle e)
-      | Tany32 | Tany64 -> Fmt.failwith "Unhandled chunk: %a" Chunk.pp chunk)
+      | Float -> return (SVfloat e)
+      | Single -> return (SVsingle e))
 
 let of_gil_expr sval_e =
   let open Formula.Infix in
@@ -319,7 +318,7 @@ module SVArray = struct
   let array_append arr el = concat arr (singleton el)
 
   let to_gil_expr_undelayed ~chunk ~range svarr =
-    let chunk_size = Chunk.size_expr chunk in
+    let chunk_size = Expr.int (Chunk.size chunk) in
     let size =
       let open Expr.Infix in
       let low, high = range in
@@ -369,7 +368,7 @@ module SVArray = struct
   let learn_chunk ~chunk ~size arr =
     let bounds =
       match chunk with
-      | Chunk.Mint8unsigned -> Some (0, 255)
+      | Chunk.Int8unsigned -> Some (0, 255)
       | _ -> None
       (* Should be completed later *)
     in

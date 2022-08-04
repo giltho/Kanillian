@@ -188,11 +188,11 @@ module Node = struct
             Fmt.pf fmt "%s UNDEF (%a)" (str_qty qty) (Fmt.Dump.option Perm.pp)
               exact_perm
         | Single { chunk; value } ->
-            Fmt.pf fmt "(%a : %a) (%a)" SVal.pp value Chunk.pp chunk
+            Fmt.pf fmt "(%a : %s) (%a)" SVal.pp value (Chunk.to_string chunk)
               (Fmt.Dump.option Perm.pp) exact_perm
         | Array { chunk; values } ->
-            Fmt.pf fmt "(%a : many %a) (%a)" SVArr.pp values Chunk.pp chunk
-              (Fmt.Dump.option Perm.pp) exact_perm)
+            Fmt.pf fmt "(%a : many %s) (%a)" SVArr.pp values
+              (Chunk.to_string chunk) (Fmt.Dump.option Perm.pp) exact_perm)
 
   let check_perm required node =
     match required with
@@ -304,7 +304,7 @@ module Node = struct
           when Chunk.equal chunk_l chunk_r ->
             let size_l, size_r =
               let open Expr.Infix in
-              let size_chunk = Chunk.size_expr chunk_l in
+              let size_chunk = Expr.int (Chunk.size chunk_l) in
               (size_a / size_chunk, size_b / size_chunk)
             in
             Delayed.map
@@ -313,7 +313,7 @@ module Node = struct
         | Array { chunk; values }, Undef _ ->
             let size_l, size_r =
               let open Expr.Infix in
-              let size_chunk = Chunk.size_expr chunk in
+              let size_chunk = Expr.int (Chunk.size chunk) in
               (size_a / size_chunk, size_b / size_chunk)
             in
             Delayed.map
@@ -322,7 +322,7 @@ module Node = struct
         | Array { chunk; values }, Zeros ->
             let size_l, size_r =
               let open Expr.Infix in
-              let size_chunk = Chunk.size_expr chunk in
+              let size_chunk = Expr.int (Chunk.size chunk) in
               (size_a / size_chunk, size_b / size_chunk)
             in
             Delayed.map
@@ -331,7 +331,7 @@ module Node = struct
         | Undef _, Array { chunk; values } ->
             let size_l, size_r =
               let open Expr.Infix in
-              let size_chunk = Chunk.size_expr chunk in
+              let size_chunk = Expr.int (Chunk.size chunk) in
               (size_a / size_chunk, size_b / size_chunk)
             in
             Delayed.map
@@ -340,7 +340,7 @@ module Node = struct
         | Zeros, Array { chunk; values } ->
             let size_l, size_r =
               let open Expr.Infix in
-              let size_chunk = Chunk.size_expr chunk in
+              let size_chunk = Expr.int (Chunk.size chunk) in
               (size_a / size_chunk, size_b / size_chunk)
             in
             Delayed.map
@@ -392,19 +392,16 @@ module Node = struct
         DR.ok
           (if Chunk.equal m_chunk chunk then (value, exact_perm)
           else (SUndefined, exact_perm))
-    | MemVal
-        { mem_val = Array { chunk = Mint8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Mint16unsigned ->
+    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
+      when Chunk.equal chunk Int16unsigned ->
         let+ decoded = decode_bytes_to_unsigned_int ~chunk values 2 in
         Ok (decoded, exact_perm)
-    | MemVal
-        { mem_val = Array { chunk = Mint8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Mint32 ->
+    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
+      when Chunk.equal chunk Int32 ->
         let+ decoded = decode_bytes_to_unsigned_int ~chunk values 4 in
         Ok (decoded, exact_perm)
-    | MemVal
-        { mem_val = Array { chunk = Mint8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Mint64 ->
+    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
+      when Chunk.equal chunk Int64 ->
         let+ decoded = decode_bytes_to_unsigned_int ~chunk values 8 in
         Ok (decoded, exact_perm)
     | MemVal { mem_val = Array { chunk = chunk_b; values }; exact_perm; _ }
@@ -419,7 +416,7 @@ module Node = struct
               match%ent a with
               | integer ->
                   let v =
-                    if Compcert.Archi.ptr64 then SVal.SVlong a else SVal.SVint a
+                    if Kconfig.ptr64 () then SVal.SVlong a else SVal.SVint a
                   in
                   DR.ok (v, exact_perm)
               | obj -> (
@@ -479,9 +476,8 @@ module Node = struct
         DR.ok
           (if Chunk.equal m_chunk chunk then (SVArr.singleton value, exact_perm)
           else (AllUndef, exact_perm))
-    | MemVal
-        { mem_val = Array { chunk = Mint8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Mint64 -> (
+    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
+      when Chunk.equal chunk Int64 -> (
         match size with
         | Expr.Lit (Int amount) ->
             let amount = Z.to_int amount in
@@ -501,11 +497,10 @@ module Node = struct
     let mem_val =
       match (sval, chunk) with
       | ( SVint _,
-          (Mint8signed | Mint8unsigned | Mint16signed | Mint16unsigned | Mint32)
-        )
-      | SVlong _, Mint64
-      | SVsingle _, Mfloat32
-      | SVfloat _, Mfloat64 -> Single { chunk; value = sval }
+          (Int8signed | Int8unsigned | Int16signed | Int16unsigned | Int32) )
+      | SVlong _, Int64
+      | SVsingle _, Float32
+      | SVfloat _, Float64 -> Single { chunk; value = sval }
       | Sptr _, c when Chunk.equal c Chunk.ptr -> Single { chunk; value = sval }
       | _ -> Single { chunk; value = SUndefined }
     in
@@ -1103,7 +1098,7 @@ module Tree = struct
         in
         CoreP.single ~loc ~ofs:low ~chunk ~sval ~perm :: types
     | MemVal { mem_val = Array { chunk; values }; exact_perm = perm; _ } -> (
-        let chksize = Chunk.size_expr chunk in
+        let chksize = Expr.int (Chunk.size chunk) in
         let total_size =
           let open Expr.Infix in
           (high - low) / chksize

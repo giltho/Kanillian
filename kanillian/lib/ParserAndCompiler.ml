@@ -18,6 +18,7 @@ module TargetLangOptions = struct
     main_only : bool;
     kstats_file : string option;
     harness : string option;
+    hide_genv : bool;
   }
 
   let term =
@@ -49,15 +50,18 @@ module TargetLangOptions = struct
     let harness =
       Arg.(value & opt (some string) None & info [ "harness" ] ~docs ~doc ~docv)
     in
-    let opt main_only kstats_file harness =
-      { main_only; kstats_file; harness }
+    let doc = "Hide the global environment from the logs" in
+    let hide_genv = Arg.(value & flag & info [ "hide-genv" ] ~docs ~doc) in
+    let opt main_only kstats_file harness hide_genv =
+      { main_only; kstats_file; harness; hide_genv }
     in
-    Term.(const opt $ main_only $ kstats_file $ harness)
+    Term.(const opt $ main_only $ kstats_file $ harness $ hide_genv)
 
-  let apply { main_only; kstats_file; harness } =
+  let apply { main_only; kstats_file; harness; hide_genv } =
     Kconfig.main_only := main_only;
     Kconfig.kstats_file := kstats_file;
-    Kconfig.harness := harness
+    Kconfig.harness := harness;
+    Kconfig.hide_genv := hide_genv
 end
 
 type err = string

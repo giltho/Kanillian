@@ -1,9 +1,4 @@
-type t = Compcert.Memtype.permission =
-  | Freeable
-  | Writable
-  | Readable
-  | Nonempty
-[@@deriving yojson]
+type t = Freeable | Writable | Readable | Nonempty [@@deriving yojson]
 
 let to_int = function
   | Freeable -> 4

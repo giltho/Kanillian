@@ -24,16 +24,6 @@ let equal a b =
   | SVfloat a, SVfloat b when Expr.equal a b -> true
   | _, _ -> false
 
-type typ = Compcert.AST.typ =
-  | Tint
-  | Tfloat
-  | Tlong
-  | Tsingle
-  | Tany32
-  | Tany64
-
-let tptr = Compcert.AST.coq_Tptr
-
 let is_loc gamma loc =
   let r_opt =
     let* loc_t = TypEnv.get gamma loc in
@@ -50,11 +40,11 @@ let is_zero = function
   | _ -> false
 
 let zero_of_chunk chunk =
-  match Compcert.AST.type_of_chunk chunk with
-  | Tany32 | Tint -> SVint Expr.zero_i
-  | Tany64 | Tlong -> SVlong Expr.zero_i
-  | Tsingle -> SVsingle (Lit (Num 0.))
-  | Tfloat -> SVfloat (Lit (Num 0.))
+  match Chunk.type_of chunk with
+  | Int -> SVint Expr.zero_i
+  | Long -> SVlong Expr.zero_i
+  | Single -> SVsingle (Lit (Num 0.))
+  | Float -> SVfloat (Lit (Num 0.))
 
 let is_loc_ofs gamma loc ofs =
   let r_opt =

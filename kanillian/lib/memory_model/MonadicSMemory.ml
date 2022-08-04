@@ -498,8 +498,7 @@ module Mem = struct
           Fmt.pf ft "%s -> @[<v 0>%a@]" loc SHeapTree.pp tree))
       mem
 
-  let pp ?(genv = GEnv.empty) fmt { map = t; _ } =
-    if !Config.pp_full_tree then pp_full ~genv fmt t else pp_normal ~genv fmt t
+  let pp ?(genv = GEnv.empty) fmt { map = t; _ } = pp_normal ~genv fmt t
 end
 
 type t' = { genv : GEnv.t; mem : Mem.t }
