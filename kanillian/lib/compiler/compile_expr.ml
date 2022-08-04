@@ -159,9 +159,31 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   let open Cs.Syntax in
   (* TODO: I should probably be assuming the *)
   match type_ with
+  | CInteger I_bool ->
+      (* Special case, the bounds are different *)
+      let assume_int = Cmd.Logic (AssumeType (expr, IntType)) in
+      let condition =
+        let open Formula.Infix in
+        expr #== Expr.one_i #|| (expr #== Expr.zero_i)
+      in
+      let assume_range = Cmd.Logic (Assume condition) in
+      Cs.return ~app:[ assume_int; assume_range ] ()
   | CInteger _ | Signedbv _ | Unsignedbv _ ->
       let assume_int = Cmd.Logic (AssumeType (expr, IntType)) in
-      Cs.unit [ assume_int ]
+      let bounds =
+        Option.bind (Memory.chunk_for_type ~ctx type_) Chunk.bounds
+      in
+      let assume_range =
+        match bounds with
+        | None -> []
+        | Some (low, high) ->
+            let open Formula.Infix in
+            let condition =
+              (Expr.int_z low) #<= expr #&& (expr #<= (Expr.int_z high))
+            in
+            [ Cmd.Logic (Assume condition) ]
+      in
+      Cs.unit (assume_int :: assume_range)
   | Double | Float ->
       let assume_num = Cmd.Logic (AssumeType (expr, NumberType)) in
       Cs.unit [ assume_num ]

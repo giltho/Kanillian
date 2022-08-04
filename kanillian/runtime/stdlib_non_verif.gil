@@ -6,7 +6,7 @@ proc i__calloc(vnelem, velsiz) {
       sz := nelem i* elsiz;
       bl := [mem_alloc](-8i, sz);
       b := l-nth(bl, 0i);
-      u := [mem_store]("int64", b, -8i, {{ "long", sz }});
+      u := [mem_store]("u64", b, -8i, {{ "long", sz }});
       i := "i__store_zeros"(b, 0i, sz);
       ret := {{ b, 0i }};
       return

@@ -12,5 +12,5 @@ let ptr64 () =
 
 let ptr_chunk () : Chunk.t =
   match !archi with
-  | Arch64 -> Int64
-  | Arch32 -> Int32
+  | Arch64 -> U64
+  | Arch32 -> U32

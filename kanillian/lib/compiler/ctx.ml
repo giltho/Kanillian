@@ -167,8 +167,8 @@ let type_equal ctx ta tb =
 
 let ptr_chunk ctx =
   match archi ctx with
-  | Arch32 -> Chunk.Int32
-  | Arch64 -> Chunk.Int64
+  | Arch32 -> Chunk.U32
+  | Arch64 -> Chunk.U64
 
 let ptr_64 ctx =
   match archi ctx with

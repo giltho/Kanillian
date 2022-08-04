@@ -18,6 +18,7 @@ type err =
   | RemovingNotOwned
   | WrongMemVal
   | MemoryNotFreed
+  | LoadingPoison
 
 exception FatalErr of err
 
@@ -35,6 +36,7 @@ let pp_err fmt = function
   | RemovingNotOwned -> Fmt.pf fmt "Removing not owned"
   | WrongMemVal -> Fmt.pf fmt "WrongMemVal"
   | MemoryNotFreed -> Fmt.pf fmt "MemoryNotFreed"
+  | LoadingPoison -> Fmt.pf fmt "LoadingPoison"
 
 let err_equal a b =
   match (a, b) with
@@ -350,7 +352,7 @@ module Node = struct
     let open Delayed.Syntax in
     let* values = SVArr.reduce arr in
     match values with
-    | AllZeros -> Delayed.return (SVal.zero_of_chunk chunk)
+    | AllZeros -> DR.ok (SVal.zero_of_chunk chunk)
     | Arr e ->
         let two_pow_8 i = Int.shift_left 1 (8 * i) in
         let open Expr.Infix in
@@ -374,34 +376,37 @@ module Node = struct
               bytes
           in
           let* v = SVal.of_chunk_and_expr chunk v in
-          Delayed.return ~learned v
-        else Delayed.return SVal.SUndefined
-    | _ -> Delayed.return SVal.SUndefined
+          DR.ok ~learned v
+        else
+          let+ ret = SVal.any_of_chunk chunk in
+          Ok ret
+    | AllUndef -> DR.error LoadingPoison
 
   let decode ~chunk t =
     let open Delayed.Syntax in
+    let open DR.Syntax in
     match t with
     | NotOwned _ -> DR.error MissingResource
     | MemVal { mem_val = Zeros; exact_perm; _ } ->
         DR.ok (SVal.zero_of_chunk chunk, exact_perm)
-    | MemVal { mem_val = Undef _; exact_perm; _ } ->
-        DR.ok (SVal.SUndefined, exact_perm)
+    | MemVal { mem_val = Undef _; exact_perm; _ } -> DR.error LoadingPoison
     | MemVal { mem_val = Single { chunk = m_chunk; value }; exact_perm; _ } ->
-        DR.ok
-          (if Chunk.equal m_chunk chunk then (value, exact_perm)
-          else (SUndefined, exact_perm))
-    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Int16unsigned ->
-        let+ decoded = decode_bytes_to_unsigned_int ~chunk values 2 in
-        Ok (decoded, exact_perm)
-    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Int32 ->
-        let+ decoded = decode_bytes_to_unsigned_int ~chunk values 4 in
-        Ok (decoded, exact_perm)
-    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Int64 ->
-        let+ decoded = decode_bytes_to_unsigned_int ~chunk values 8 in
-        Ok (decoded, exact_perm)
+        if Chunk.equal m_chunk chunk then DR.ok (value, exact_perm)
+        else
+          let+ ret = SVal.any_of_chunk chunk in
+          Ok (ret, exact_perm)
+    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
+      when Chunk.equal chunk U16 ->
+        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 2 in
+        (decoded, exact_perm)
+    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
+      when Chunk.equal chunk U32 ->
+        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 4 in
+        (decoded, exact_perm)
+    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
+      when Chunk.equal chunk U32 ->
+        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 8 in
+        (decoded, exact_perm)
     | MemVal { mem_val = Array { chunk = chunk_b; values }; exact_perm; _ }
       when Chunk.equal chunk chunk_b -> (
         let* values = SVArr.reduce values in
@@ -410,7 +415,7 @@ module Node = struct
         | Arr (EList [ a ]) ->
             let* sval = SVal.of_chunk_and_expr chunk a in
             DR.ok (sval, exact_perm)
-        | AllUndef -> DR.ok (SVal.SUndefined, exact_perm)
+        | AllUndef -> DR.error LoadingPoison
         | Arr l ->
             let* () =
               let open Formula.Infix in
@@ -421,10 +426,12 @@ module Node = struct
             let* sval = SVal.of_chunk_and_expr chunk (Expr.list_nth l 0) in
             DR.ok (sval, exact_perm))
     | MemVal { mem_val = Array { chunk = _; _ }; exact_perm; _ } ->
-        DR.ok (SVal.SUndefined, exact_perm)
+        let+ ret = SVal.any_of_chunk chunk in
+        Ok (ret, exact_perm)
 
   let decode_arr ~size ~chunk t =
     let open Delayed.Syntax in
+    let open DR.Syntax in
     let split_array_in ~size ~amount arr =
       match arr with
       | SVArr.AllUndef -> List.init amount (fun _ -> SVArr.AllUndef)
@@ -443,13 +450,13 @@ module Node = struct
       let rec get_values = function
         | [] -> Fmt.failwith "EMPTY ARRAY ??"
         | [ one_value ] ->
-            let+ that_value =
+            let++ that_value =
               decode_bytes_to_unsigned_int ~chunk one_value size
             in
             SVArr.singleton that_value
         | a :: r ->
-            let* that_value = decode_bytes_to_unsigned_int ~chunk a size in
-            let+ rest = get_values r in
+            let** that_value = decode_bytes_to_unsigned_int ~chunk a size in
+            let++ rest = get_values r in
             Option.get @@ SVArr.array_cons that_value rest
       in
       get_values arrs
@@ -464,15 +471,15 @@ module Node = struct
         DR.ok
           (if Chunk.equal m_chunk chunk then (SVArr.singleton value, exact_perm)
           else (AllUndef, exact_perm))
-    | MemVal { mem_val = Array { chunk = Int8unsigned; values }; exact_perm; _ }
-      when Chunk.equal chunk Int64 -> (
+    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
+      when Chunk.equal chunk U64 -> (
         match size with
         | Expr.Lit (Int amount) ->
             let amount = Z.to_int amount in
-            let+ arr =
+            let++ arr =
               decode_several_unsigned_ints_of_bytes ~amount ~chunk values
             in
-            Ok (arr, exact_perm)
+            (arr, exact_perm)
         | _ -> DR.ok (SVArr.AllUndef, exact_perm))
     | MemVal { mem_val = Array { chunk = m_chunk; values }; exact_perm; _ }
       when Chunk.equal m_chunk chunk ->
@@ -481,16 +488,22 @@ module Node = struct
     | MemVal { mem_val = Array _; exact_perm; _ } ->
         DR.ok (SVArr.AllUndef, exact_perm)
 
-  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) =
-    let mem_val =
-      match sval with
-      | SVint (_, chunkv) when Chunk.equal chunk chunkv ->
-          Single { chunk; value = sval }
-      | SVfloat (_, `Double) when Chunk.equal chunk Float64 ->
-          Single { chunk = Float64; value = sval }
-      | SVfloat (_, `Single) -> Single { chunk = Float32; value = sval }
-      | Sptr _ -> Single { chunk = Kconfig.ptr_chunk (); value = sval }
-      | _ -> Single { chunk; value = SUndefined }
+  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) : t Delayed.t =
+    let open Delayed.Syntax in
+    let return = Delayed.return in
+    let+ mem_val =
+      match (sval, chunk) with
+      | SVint (_, chunkv), chunk when Chunk.equal chunk chunkv ->
+          return (Single { chunk; value = sval })
+      | SVfloat (_, `Double), Chunk.F64 ->
+          return (Single { chunk = F64; value = sval })
+      | SVfloat (_, `Single), F32 ->
+          return (Single { chunk = F32; value = sval })
+      | Sptr _, chunk when Chunk.equal (Kconfig.ptr_chunk ()) chunk ->
+          return (Single { chunk; value = sval })
+      | _ ->
+          let+ value = SVal.any_of_chunk chunk in
+          Single { chunk; value }
     in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
@@ -629,7 +642,8 @@ module Tree = struct
       { node = new_node; span; children = Some (left, right); last_path = None }
 
   let sval_leaf ~low ~perm ~value ~chunk =
-    let node = Node.encode ~perm ~chunk value in
+    let open Delayed.Syntax in
+    let+ node = Node.encode ~perm ~chunk value in
     let span = Range.of_low_and_chunk low chunk in
     make ~node ~span ()
 
@@ -717,8 +731,11 @@ module Tree = struct
     in
     Delayed.return result
 
-  let frame_range (t : t) ~replace_node ~rebuild_parent (range : Range.t) :
-      (t * t, err) DR.t =
+  let frame_range
+      (t : t)
+      ~(replace_node : t -> (t, err) DR.t)
+      ~rebuild_parent
+      (range : Range.t) : (t * t, err) DR.t =
     let open DR.Syntax in
     let open Delayed.Syntax in
     let rec extract (t : t) (range : Range.t) : (t * t option) Delayed.t =
@@ -758,8 +775,11 @@ module Tree = struct
           let* new_right = add_to_the_right right addition in
           of_children_s ~left ~right:new_right
     in
-    let rec frame_inside ~replace_node ~rebuild_parent (t : t) (range : Range.t)
-        =
+    let rec frame_inside
+        ~(replace_node : t -> (t, err) DR.t)
+        ~rebuild_parent
+        (t : t)
+        (range : Range.t) =
       Logging.verbose (fun fmt ->
           fmt "STARTING FRAME INSIDE WITH: %a" pp_full t);
       if%sat
@@ -767,9 +787,8 @@ module Tree = struct
         Range.is_equal range t.span
       then (
         log_string "Range does equal span, replacing.";
-        match replace_node t with
-        | Ok new_tree -> DR.ok (t, { new_tree with last_path = Some Here })
-        | Error err -> DR.error err)
+        let++ new_tree = replace_node t in
+        (t, { new_tree with last_path = Some Here }))
       else
         match t.children with
         | Some (left, right) ->
@@ -780,7 +799,7 @@ module Tree = struct
             then
               let _, h = range in
               let upper_range = (mid, h) in
-              let dont_replace_node t = Ok t in
+              let dont_replace_node t = DR.ok t in
               let** _, right =
                 frame_inside ~replace_node:dont_replace_node
                   ~rebuild_parent:with_children right upper_range
@@ -833,14 +852,14 @@ module Tree = struct
 
   let get_node (t : t) range : (Node.t * t, err) DR.t =
     let open DR.Syntax in
-    let replace_node x = Ok x in
+    let replace_node x = DR.ok x in
     let rebuild_parent = with_children in
     let++ framed, rest = frame_range t ~replace_node ~rebuild_parent range in
     (framed.node, rest)
 
   let set_node (t : t) range node : (t, err) DR.t =
     let open DR.Syntax in
-    let replace_node _ = Ok (make ~node ~span:range ()) in
+    let replace_node _ = DR.ok (make ~node ~span:range ()) in
     let rebuild_parent = of_children in
     let++ _, t = frame_range t ~replace_node ~rebuild_parent range in
     t
@@ -875,7 +894,7 @@ module Tree = struct
     let open DR.Syntax in
     let open Delayed.Syntax in
     let* size = Delayed.reduce size in
-    let replace_node x = Ok x in
+    let replace_node x = DR.ok x in
     let rebuild_parent = with_children in
     let range = Range.of_low_chunk_and_size low chunk size in
     let** framed, tree = frame_range t ~replace_node ~rebuild_parent range in
@@ -891,7 +910,7 @@ module Tree = struct
       (perm : Perm.t) : (t, err) DR.t =
     let open DR.Syntax in
     let open Delayed.Syntax in
-    let replace_node _ = Ok (sarr_leaf ~low ~chunk ~array ~size ~perm) in
+    let replace_node _ = DR.ok (sarr_leaf ~low ~chunk ~array ~size ~perm) in
     let rebuild_parent = of_children in
     let range = Range.of_low_chunk_and_size low chunk size in
     let** _, t = frame_range t ~replace_node ~rebuild_parent range in
@@ -901,7 +920,7 @@ module Tree = struct
   let get_single (t : t) (low : Expr.t) (chunk : Chunk.t) :
       (SVal.t * Perm.t option * t, err) DR.t =
     let open DR.Syntax in
-    let replace_node x = Ok x in
+    let replace_node x = DR.ok x in
     let rebuild_parent = with_children in
     let range = Range.of_low_and_chunk low chunk in
     let** framed, tree = frame_range t ~replace_node ~rebuild_parent range in
@@ -918,7 +937,11 @@ module Tree = struct
       (sval : SVal.t)
       (perm : Perm.t) : (t, err) DR.t =
     let open DR.Syntax in
-    let replace_node _ = Ok (sval_leaf ~low ~chunk ~value:sval ~perm) in
+    let open Delayed.Syntax in
+    let replace_node _ =
+      let+ leaf = sval_leaf ~low ~chunk ~value:sval ~perm in
+      Ok leaf
+    in
     let rebuild_parent = of_children in
     let range = Range.of_low_and_chunk low chunk in
     let++ _, t = frame_range t ~replace_node ~rebuild_parent range in
@@ -930,11 +953,11 @@ module Tree = struct
     let range = Range.of_low_and_chunk low chunk in
     let replace_node node =
       match node.node with
-      | Node.NotOwned _ -> Error MissingResource
+      | Node.NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
-          if min_perm >=% Readable then Ok node
+          if min_perm >=% Readable then DR.ok node
           else
-            Error
+            DR.error
               (InsufficientPermission { required = Readable; actual = min_perm })
     in
     let rebuild_parent = with_children in
@@ -945,16 +968,18 @@ module Tree = struct
   let store (t : t) (low : Expr.t) (chunk : Chunk.t) (sval : SVal.t) :
       (t, err) DR.t =
     let open DR.Syntax in
+    let open Delayed.Syntax in
     let open Perm.Infix in
     let range = Range.of_low_and_chunk low chunk in
     let replace_node node =
       match node.node with
-      | NotOwned _ -> Error MissingResource
+      | NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
           if min_perm >=% Writable then
-            Ok (sval_leaf ~low ~chunk ~value:sval ~perm:min_perm)
+            let+ leaf = sval_leaf ~low ~chunk ~value:sval ~perm:min_perm in
+            Ok leaf
           else
-            Error
+            DR.error
               (InsufficientPermission { required = Writable; actual = min_perm })
     in
     let rebuild_parent = of_children in
@@ -966,11 +991,11 @@ module Tree = struct
     let open Perm.Infix in
     let replace_node node =
       match node.node with
-      | NotOwned _ -> Error MissingResource
+      | NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
-          if min_perm >=% Writable then Ok (zeros ~perm:min_perm range)
+          if min_perm >=% Writable then DR.ok (zeros ~perm:min_perm range)
           else
-            Error
+            DR.error
               (InsufficientPermission { required = Writable; actual = min_perm })
     in
     let rebuild_parent = of_children in
@@ -982,11 +1007,11 @@ module Tree = struct
     let open Perm.Infix in
     let replace_node node =
       match node.node with
-      | NotOwned _ -> Error MissingResource
+      | NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
-          if min_perm >=% Writable then Ok (undefined ~perm:min_perm range)
+          if min_perm >=% Writable then DR.ok (undefined ~perm:min_perm range)
           else
-            Error
+            DR.error
               (InsufficientPermission { required = Writable; actual = min_perm })
     in
     let rebuild_parent = of_children in
@@ -1034,10 +1059,10 @@ module Tree = struct
     let range = Range.make low high in
     let replace_node node =
       match node.node with
-      | NotOwned _ -> Error MissingResource
-      | MemVal { min_perm = Freeable; _ } -> Ok (rec_set_perm node)
+      | NotOwned _ -> DR.error MissingResource
+      | MemVal { min_perm = Freeable; _ } -> DR.ok (rec_set_perm node)
       | MemVal { min_perm; _ } ->
-          Error
+          DR.error
             (InsufficientPermission { required = Freeable; actual = min_perm })
     in
     let rebuild_parent = update_parent_perm in
@@ -1478,7 +1503,7 @@ let move dst_tree dst_ofs src_tree src_ofs size =
     | Some src_root ->
         let** framed, _ =
           Tree.frame_range src_root
-            ~replace_node:(fun x -> Ok x)
+            ~replace_node:(fun x -> DR.ok x)
             ~rebuild_parent:(fun t ~left:_ ~right:_ -> Delayed.return t)
             src_range
         in
@@ -1497,8 +1522,8 @@ let move dst_tree dst_ofs src_tree src_ofs size =
                 Tree.frame_range dst_root
                   ~replace_node:(fun current ->
                     match current.node with
-                    | NotOwned _ -> Error MissingResource
-                    | _ -> Ok (Tree.realign framed dst_ofs))
+                    | NotOwned _ -> DR.error MissingResource
+                    | _ -> DR.ok (Tree.realign framed dst_ofs))
                   ~rebuild_parent:Tree.of_children dst_range
               in
               DR.of_result (with_root dst_tree new_dst_root)
@@ -1561,7 +1586,7 @@ let merge ~old_tree ~new_tree =
                 List.fold_left
                   (fun acc (tree_node : Tree.t) ->
                     let** acc in
-                    let replace_node _ = Ok tree_node in
+                    let replace_node _ = DR.ok tree_node in
                     let rebuild_parent = Tree.of_children in
                     let++ _, tree =
                       Tree.frame_range acc ~replace_node ~rebuild_parent

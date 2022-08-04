@@ -34,7 +34,7 @@ proc i__memcpy(ptr1, ptr2, sz) {
 proc i__memset(ptr, vc, n) {
             n := n i- 1i;
       loop: goto [not (n i< 0i)] ctn end;
-      ctn:  u := [mem_store]("int8unsigned", l-nth(ptr, 0i), l-nth(ptr, 1i) i+ n, vc);
+      ctn:  u := [mem_store]("u8", l-nth(ptr, 0i), l-nth(ptr, 1i) i+ n, vc);
             n := n i- 1i;
             goto loop;
       end:  ret := ptr;

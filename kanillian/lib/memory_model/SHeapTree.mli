@@ -12,6 +12,7 @@ type err =
   | RemovingNotOwned
   | WrongMemVal
   | MemoryNotFreed
+  | LoadingPoison
 
 val pp_err : err Fmt.t
 val err_equal : err -> err -> bool

@@ -2,51 +2,24 @@ open Gil_syntax
 module GType = Goto_lib.Type
 module Interface = Memory_model.Interface
 
-type chunk =
-  | Int8signed
-  | Int8unsigned
-  | Int16signed
-  | Int16unsigned
-  | Int32
-  | Int64
-  | Float32
-  | Float64
-
-let chunk_to_string = function
-  | Int8signed -> "int8signed"
-  | Int8unsigned -> "int8unsigned"
-  | Int16signed -> "int16signed"
-  | Int16unsigned -> "int16unsigned"
-  | Int32 -> "int32"
-  | Int64 -> "int64"
-  | Float32 -> "float32"
-  | Float64 -> "float64"
-
-let int_chuck_for ~signed ~size =
-  match size with
-  | 8 -> Some (if signed then Int8signed else Int8unsigned)
-  | 16 -> Some (if signed then Int16signed else Int16unsigned)
-  | 32 -> Some Int32
-  | 64 -> Some Int64
-  | _ -> None
-
-let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : chunk option =
+let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
   match t with
-  | CInteger I_bool -> int_chuck_for ~signed:false ~size:ctx.machine.bool_width
+  | CInteger I_bool ->
+      Chunk.of_int_type ~signed:false ~size:ctx.machine.bool_width
   | CInteger I_char ->
-      int_chuck_for
+      Chunk.of_int_type
         ~signed:(not ctx.machine.char_is_unsigned)
         ~size:ctx.machine.char_width
-  | CInteger I_int -> int_chuck_for ~signed:true ~size:ctx.machine.int_width
+  | CInteger I_int -> Chunk.of_int_type ~signed:true ~size:ctx.machine.int_width
   | CInteger I_size_t ->
-      int_chuck_for ~signed:false ~size:ctx.machine.pointer_width
+      Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
   | CInteger I_ssize_t ->
-      int_chuck_for ~signed:true ~size:ctx.machine.pointer_width
-  | Signedbv { width } -> int_chuck_for ~signed:true ~size:width
-  | Unsignedbv { width } -> int_chuck_for ~signed:false ~size:width
-  | Float -> Some Float32
-  | Double -> Some Float64
-  | Pointer _ -> int_chuck_for ~signed:false ~size:ctx.machine.pointer_width
+      Chunk.of_int_type ~signed:true ~size:ctx.machine.pointer_width
+  | Signedbv { width } -> Chunk.of_int_type ~signed:true ~size:width
+  | Unsignedbv { width } -> Chunk.of_int_type ~signed:false ~size:width
+  | Float -> Some F32
+  | Double -> Some F64
+  | Pointer _ -> Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
   | _ ->
       Error.code_error
         ("chunk_for_type: received a type that is not a scalar " ^ GType.show t)
@@ -113,7 +86,7 @@ let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
       let cmd = Helpers.assert_unhandled ~feature:(LoadScalar t) [ e ] in
       Cs.return ~app:[ cmd ] "UNREACHABLE"
   | Some chunk ->
-      let chunk = Expr.Lit (String (chunk_to_string chunk)) in
+      let chunk = Expr.Lit (String (Chunk.to_string chunk)) in
       let var =
         match var with
         | Some var -> var
@@ -130,7 +103,7 @@ let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
   match chunk_for_type ~ctx t with
   | None -> Helpers.assert_unhandled ~feature:(StoreScalar t) []
   | Some chunk ->
-      let chunk = Expr.Lit (String (chunk_to_string chunk)) in
+      let chunk = Expr.Lit (String (Chunk.to_string chunk)) in
       let var =
         match var with
         | Some var -> var

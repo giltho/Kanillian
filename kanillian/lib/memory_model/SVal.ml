@@ -5,7 +5,6 @@ module DO = Delayed_option
 module DR = Delayed_result
 
 type t =
-  | SUndefined
   | Sptr of string * Expr.t
   | SVint of Expr.t * Chunk.t
   | SVfloat of Expr.t * [ `Single | `Double ]
@@ -15,7 +14,6 @@ let pp ft v =
   let open Fmt in
   let se = Expr.pp in
   match v with
-  | SUndefined -> pf ft "undefined"
   | Sptr (l, ofs) -> pf ft "Ptr(%s, %a)" l se ofs
   | SVint (i, c) -> pf ft "(%a: %s)" se i (Chunk.to_string c)
   | SVfloat (f, c) ->
@@ -28,7 +26,6 @@ let substitution ~le_subst sv =
   match sv with
   | SVint (v, c) -> SVint (le_subst v, c)
   | SVfloat (v, c) -> SVfloat (le_subst v, c)
-  | SUndefined -> SUndefined
   | Sptr (loc, offs) -> (
       let loc_e = Expr.loc_from_loc_name loc in
       match le_subst loc_e with
@@ -41,22 +38,43 @@ exception Not_a_C_value of Expr.t
 
 let zero_of_chunk (chunk : Chunk.t) =
   match chunk with
-  | Int32 | Int16signed | Int8signed | Int8unsigned | Int16unsigned | Int64 ->
+  | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 ->
       SVint (Expr.zero_i, chunk)
-  | Float32 -> SVfloat (Lit (Num 0.), `Single)
-  | Float64 -> SVfloat (Lit (Num 0.), `Double)
+  | F32 -> SVfloat (Lit (Num 0.), `Single)
+  | F64 -> SVfloat (Lit (Num 0.), `Double)
+
+let any_of_chunk (chunk : Chunk.t) : t Delayed.t =
+  let lvar = LVar.alloc () in
+  let lvar_e = Expr.LVar lvar in
+  match chunk with
+  | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 ->
+      let learned_types = [ (lvar, Type.IntType) ] in
+      let learned =
+        match Chunk.bounds chunk with
+        | Some (low, high) ->
+            let open Formula.Infix in
+            [ lvar_e #>= (Expr.int_z low); lvar_e #<= (Expr.int_z high) ]
+        | None -> []
+      in
+      Delayed.return ~learned_types ~learned (SVint (lvar_e, chunk))
+  | F32 ->
+      let learned_types = [ (lvar, Type.NumberType) ] in
+      let learned = [] in
+      Delayed.return ~learned_types ~learned (SVfloat (lvar_e, `Single))
+  | F64 ->
+      let learned_types = [ (lvar, Type.NumberType) ] in
+      let learned = [] in
+      Delayed.return ~learned_types ~learned (SVfloat (lvar_e, `Double))
 
 let lvars =
   let open Utils.Containers in
   function
-  | SUndefined -> SS.empty
   | Sptr (_, e) -> Expr.lvars e
   | SVint (e, _) | SVfloat (e, _) -> Expr.lvars e
 
 let alocs =
   let open Utils.Containers in
   function
-  | SUndefined -> SS.empty
   | Sptr (l, e) ->
       let alocs_e = Expr.alocs e in
       if Utils.Names.is_aloc_name l then SS.add l alocs_e else alocs_e
@@ -90,52 +108,48 @@ let of_chunk_and_expr (chunk : Chunk.t) sval_e =
   let assert_type ty = Delayed.assert_type sval_e ty (Not_a_C_value sval_e) in
   let svint ?learned () = return ?learned (SVint (sval_e, chunk)) in
   let sptr ?learned l o = return ?learned (Sptr (l, o)) in
-  if%ent undefined sval_e then return SUndefined
-  else
-    match (chunk, !Kconfig.archi) with
-    | Int64, Arch64 | Int32, Arch32 ->
-        let* is_int = Delayed.has_type sval_e IntType in
-        if is_int then svint ()
-        else
-          let* () = Delayed.assert_ (obj sval_e) (Not_a_C_value sval_e) in
-          let loc_expr = Expr.list_nth sval_e 0 in
-          let ofs = Expr.list_nth sval_e 1 in
-          let* ofs = Delayed.reduce ofs in
-          let* loc_opt = Delayed.resolve_loc loc_expr in
-          let loc, learned =
-            match loc_opt with
-            | Some l -> (l, [])
-            | None ->
-                let aloc = ALoc.alloc () in
-                let learned =
-                  let open Formula.Infix in
-                  [ loc_expr #== (ALoc aloc) ]
-                in
-                (aloc, learned)
-          in
-          sptr ~learned loc ofs
-    | Int64, _ -> svint ()
-    | (Int32 | Int8unsigned | Int8signed | Int16unsigned | Int16signed), _ ->
-        let* () = assert_type IntType in
-        let open Formula.Infix in
-        let i k = Expr.int k in
-        let learned =
-          match chunk with
-          | Int8unsigned -> [ (i 0) #<= sval_e; sval_e #<= (i 255) ]
-          | _ -> []
+  match (chunk, !Kconfig.archi) with
+  | U64, Arch64 | U32, Arch32 ->
+      let* is_int = Delayed.has_type sval_e IntType in
+      if is_int then svint ()
+      else
+        let* () = Delayed.assert_ (obj sval_e) (Not_a_C_value sval_e) in
+        let loc_expr = Expr.list_nth sval_e 0 in
+        let ofs = Expr.list_nth sval_e 1 in
+        let* ofs = Delayed.reduce ofs in
+        let* loc_opt = Delayed.resolve_loc loc_expr in
+        let loc, learned =
+          match loc_opt with
+          | Some l -> (l, [])
+          | None ->
+              let aloc = ALoc.alloc () in
+              let learned =
+                let open Formula.Infix in
+                [ loc_expr #== (ALoc aloc) ]
+              in
+              (aloc, learned)
         in
-        svint ~learned ()
-    | Float64, _ ->
-        let* () = assert_type NumberType in
-        return (SVfloat (sval_e, `Double))
-    | Float32, _ ->
-        let* () = assert_type NumberType in
-        return (SVfloat (sval_e, `Single))
+        sptr ~learned loc ofs
+  | (U8 | I8 | U16 | I16 | I32 | U32 | I64 | U64 | I128 | U128), _ ->
+      let* () = assert_type IntType in
+      let open Formula.Infix in
+      let i k = Expr.int k in
+      let learned =
+        match chunk with
+        | U8 -> [ (i 0) #<= sval_e; sval_e #<= (i 255) ]
+        | _ -> []
+      in
+      svint ~learned ()
+  | F64, _ ->
+      let* () = assert_type NumberType in
+      return (SVfloat (sval_e, `Double))
+  | F32, _ ->
+      let* () = assert_type NumberType in
+      return (SVfloat (sval_e, `Single))
 
 let to_gil_expr_undelayed sval =
   let open Expr in
   match sval with
-  | SUndefined -> (Lit Undefined, [])
   | Sptr (loc_name, offset) ->
       let loc = loc_from_loc_name loc_name in
       (EList [ loc; offset ], [ (loc, Type.ObjectType); (offset, Type.IntType) ])
@@ -320,7 +334,6 @@ module SVArray = struct
         let+ v = of_chunk_and_expr chunk a in
         Some v
     | AllZeros -> DO.some (zero_of_chunk chunk)
-    | AllUndef -> DO.some SUndefined
     | _ -> DO.none ()
 
   let singleton = function
@@ -329,7 +342,6 @@ module SVArray = struct
     | Sptr _ as ptr ->
         let e_ptr, _ = to_gil_expr_undelayed ptr in
         Arr (Expr.EList [ e_ptr ])
-    | SUndefined -> AllUndef
 
   let array_sub arr o len : t =
     match arr with
@@ -391,19 +403,14 @@ module SVArray = struct
 
   (** Only call on Mint8Unsigned arrays *)
   let learn_chunk ~chunk ~size arr =
-    let bounds =
-      match chunk with
-      | Chunk.Int8unsigned -> Some (0, 255)
-      | _ -> None
-      (* Should be completed later *)
-    in
+    let bounds = Chunk.bounds chunk in
     let* size = Delayed.reduce size in
     match bounds with
     | None -> Delayed.return ()
     | Some (low, high) -> (
         match arr with
         | Arr (EList e) ->
-            let i k = Expr.int k in
+            let i k = Expr.int_z k in
             let learned =
               List.concat_map
                 (function
@@ -417,7 +424,7 @@ module SVArray = struct
         | Arr e -> (
             match size with
             | Expr.Lit (Int n) ->
-                let i k = Expr.int k in
+                let i k = Expr.int_z k in
                 let learned =
                   List.concat
                     (List.init (Z.to_int n) (fun k ->
