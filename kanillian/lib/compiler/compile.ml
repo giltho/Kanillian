@@ -259,37 +259,19 @@ let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
     let id = fn.location.origin_id in
     Body_item.make ~loc ~id
   in
-  let loc_expr, alloc_cmd = Memory.alloc ~loc_var:"ll" ~size:1 in
-  let alloc_cmd = b alloc_cmd in
-  let loc = "loc" in
-  let assign_cmd = b @@ Cmd.Assignment (loc, loc_expr) in
-  let loc = Expr.PVar loc in
-  let drop_perm_cmd =
-    let drom_perm = Mem_interface.(str_ac (AMem DropPerm)) in
-    let perm_string = Expr.Lit (String (Perm.to_string Nonempty)) in
-    b
-    @@ Cmd.LAction
-         ("u", drom_perm, [ loc; Expr.zero_i; Expr.int 1; perm_string ])
-  in
-  let symexpr = Expr.string fn.symbol in
+  let symbol = Expr.string fn.symbol in
+
   let target =
     match Constants.Internal_functions.hook fn.symbol with
     | Some f -> f
     | None -> fn.symbol
   in
   let target = Expr.string target in
-  let set_symbol_cmd =
-    let set_symbol = Mem_interface.(str_ac (AGEnv SetSymbol)) in
-    b @@ Cmd.LAction ("u", set_symbol, [ symexpr; loc ])
+  let glob_set_fun = Expr.string Constants.Internal_functions.glob_set_fun in
+  let call =
+    b @@ Cmd.Call ("u", glob_set_fun, [ symbol; target ], None, None)
   in
-  let set_def_cmd =
-    let set_def = Mem_interface.(str_ac (AGEnv SetDef)) in
-    b
-    @@ Cmd.LAction
-         ("u", set_def, [ loc; EList [ Lit (String "function"); target ] ])
-  in
-  List.to_seq
-    [ alloc_cmd; assign_cmd; drop_perm_cmd; set_symbol_cmd; set_def_cmd ]
+  Seq.return call
 
 (* This is to be used without a current body.
    Do not call fresh_v or fresh_lv inside *)

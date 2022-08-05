@@ -9,6 +9,7 @@ module Internal_functions = struct
   let ef_memcpy = "i__ef_memcpy"
   let val_of_bool = "i__value_of_bool"
   let bool_of_val = "i__bool_of_value"
+  let glob_set_fun = "i__glob_set_fun"
 
   let hook = function
     | "malloc" -> Some malloc
