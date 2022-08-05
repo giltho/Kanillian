@@ -35,7 +35,19 @@ proc i__bool_of_value(v) {
       unde: fail[operator]("Not a boolean value")
 };
 
-
+proc i__greater_perm(perma, permb) {
+            goto [
+                (permb = "None")
+            or ((permb = "Nonempty") and ((perma = "Nonempty") or (perma = "Readable") or (perma = "Writable") or (perma = "Freeable")))
+            or ((permb = "Readable") and ((perma = "Readable") or (perma = "Writable") or (perma = "Freeable")))
+            or ((permb = "Writable") and ((perma = "Writable") or (perma = "Freeable")))
+            or ((permb = "Freeable") and (perma = "Freeable"))
+            ] yes no;
+      yes:  ret := true;
+            return;
+      no:   ret := false;
+            return
+};
 
 proc i__has_cur_perm(b, o, perm) {
       perml := [mem_getcurperm](b, o);

@@ -488,23 +488,8 @@ module Node = struct
     | MemVal { mem_val = Array _; exact_perm; _ } ->
         DR.ok (SVArr.AllUndef, exact_perm)
 
-  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) : t Delayed.t =
-    let open Delayed.Syntax in
-    let return = Delayed.return in
-    let+ mem_val =
-      match (sval, chunk) with
-      | SVint (_, chunkv), chunk when Chunk.equal chunk chunkv ->
-          return (Single { chunk; value = sval })
-      | SVfloat (_, `Double), Chunk.F64 ->
-          return (Single { chunk = F64; value = sval })
-      | SVfloat (_, `Single), F32 ->
-          return (Single { chunk = F32; value = sval })
-      | Sptr _, chunk when Chunk.equal (Kconfig.ptr_chunk ()) chunk ->
-          return (Single { chunk; value = sval })
-      | _ ->
-          let+ value = SVal.any_of_chunk chunk in
-          Single { chunk; value }
-    in
+  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) : t =
+    let mem_val = Single { chunk; value = sval } in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
   let encode_arr ~(perm : Perm.t) ~(chunk : Chunk.t) (sarr : SVArr.t) =
@@ -643,7 +628,7 @@ module Tree = struct
 
   let sval_leaf ~low ~perm ~value ~chunk =
     let open Delayed.Syntax in
-    let+ node = Node.encode ~perm ~chunk value in
+    let node = Node.encode ~perm ~chunk value in
     let span = Range.of_low_and_chunk low chunk in
     make ~node ~span ()
 
@@ -939,8 +924,8 @@ module Tree = struct
     let open DR.Syntax in
     let open Delayed.Syntax in
     let replace_node _ =
-      let+ leaf = sval_leaf ~low ~chunk ~value:sval ~perm in
-      Ok leaf
+      let leaf = sval_leaf ~low ~chunk ~value:sval ~perm in
+      DR.ok leaf
     in
     let rebuild_parent = of_children in
     let range = Range.of_low_and_chunk low chunk in
@@ -976,8 +961,8 @@ module Tree = struct
       | NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
           if min_perm >=% Writable then
-            let+ leaf = sval_leaf ~low ~chunk ~value:sval ~perm:min_perm in
-            Ok leaf
+            let leaf = sval_leaf ~low ~chunk ~value:sval ~perm:min_perm in
+            DR.ok leaf
           else
             DR.error
               (InsufficientPermission { required = Writable; actual = min_perm })
@@ -1101,14 +1086,8 @@ module Tree = struct
     | MemVal { mem_val = Zeros; exact_perm = perm; _ } ->
         [ CoreP.zeros ~loc ~low ~high ~perm ]
     | MemVal { mem_val = Single { chunk; value }; exact_perm = perm; _ } ->
-        let sval, types = SVal.to_gil_expr_undelayed value in
-        let types =
-          List.map
-            (let open Formula.Infix in
-            fun (x, t) -> Asrt.Pure (Expr.typeof x) #== (Expr.type_ t))
-            types
-        in
-        CoreP.single ~loc ~ofs:low ~chunk ~sval ~perm :: types
+        let sval = SVal.to_gil_expr value in
+        [ CoreP.single ~loc ~ofs:low ~chunk ~sval ~perm ]
     | MemVal { mem_val = Array { chunk; values }; exact_perm = perm; _ } -> (
         let chksize = Expr.int (Chunk.size chunk) in
         let total_size =

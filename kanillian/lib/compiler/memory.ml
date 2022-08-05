@@ -20,9 +20,7 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
   | Float -> Some F32
   | Double -> Some F64
   | Pointer _ -> Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
-  | _ ->
-      Error.code_error
-        ("chunk_for_type: received a type that is not a scalar " ^ GType.show t)
+  | _ -> None
 
 let ptr_add_e p e =
   let loc = Expr.list_nth p 0 in

@@ -589,7 +589,7 @@ let execute_load heap params =
   | [ Expr.Lit (String chunk_name); loc; ofs ] ->
       let chunk = Chunk.of_string chunk_name in
       let** value, mem = Mem.load heap.mem loc chunk ofs in
-      let* gil_value = SVal.to_gil_expr value in
+      let gil_value = SVal.to_gil_expr value in
       DR.ok (make_branch ~heap:{ heap with mem } ~rets:[ gil_value ] ())
   | _ -> fail_ungracefully "store" params
 
@@ -632,7 +632,7 @@ let execute_get_single heap params =
       let chunk = Chunk.of_string chunk_string in
       let** mem, loc_name, sval, perm = Mem.get_single heap.mem loc ofs chunk in
       let loc_e = expr_of_loc_name loc_name in
-      let* sval_e = SVal.to_gil_expr sval in
+      let sval_e = SVal.to_gil_expr sval in
       let perm_string = Perm.opt_to_string perm in
       DR.ok
         (make_branch ~heap:{ heap with mem }

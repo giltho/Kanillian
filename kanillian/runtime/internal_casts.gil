@@ -1,10 +1,7 @@
-proc i__cast_unsign_int(v1) {
-    assert (0i i<=# v1); (* It has to not overflow *)
-    ret := v1;
-    return
-};
-
-proc i__cast_sign_int(v1) {
-  ret := v1;
-  return
+proc i__cast_unsign_int_same_size(v1, two_power_size) {
+         goto [0i i<= v1] nop cop;
+    nop: ret := v1;
+         return;
+    cop: ret := unsigned_max + v1;
+         return
 };

@@ -40,8 +40,7 @@ module Binop_functions = struct
 end
 
 module Cast_functions = struct
-  let unsign_int = "i__cast_unsign_int"
-  let sign_int = "i__cast_sign_int"
+  let unsign_int_same_size = "i__cast_unsign_int_same_size"
 end
 
 module Internal_Predicates = struct

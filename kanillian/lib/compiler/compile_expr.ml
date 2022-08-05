@@ -42,18 +42,36 @@ let compile_binop
      This is for size_t and pointer operations. *)
   assert (Machine_model.(equal archi64 ctx.machine));
   let ( ||> ) comp f = Then (comp, f) in
+  let int_in_bounds ~ty e =
+    let error () =
+      Error.code_error (Fmt.str "int_in_bounds for non-int: %a" GType.pp ty)
+    in
+    let low, high =
+      match Memory.chunk_for_type ~ctx ty with
+      | Some (F32 | F64) | None -> error ()
+      | Some c -> (
+          match Chunk.bounds c with
+          | None -> error ()
+          | Some (low, high) -> (low, high))
+    in
+    let ( <= ) a b = Expr.BinOp (a, ILessThanEqual, b) in
+    let ( && ) a b = Expr.BinOp (a, BAnd, b) in
+    Expr.Infix.not (Expr.int_z low <= e && e <= Expr.int_z high)
+  in
   let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
     let open Constants.Binop_functions in
     match binop with
     | Equal -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) -> GilBinop BinOp.Equal
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ -> GilBinop BinOp.Equal
         | CInteger I_size_t | Pointer _ -> Proc eq_maybe_ptr
         | _ -> Unhandled `With_type)
     | Notequal -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ ->
             GilBinop BinOp.Equal ||> fun e -> Expr.Infix.not e
         | CInteger I_size_t | Pointer _ -> Proc neq_maybe_ptr
         | _ -> Unhandled `With_type)
@@ -67,18 +85,20 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Le -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
-            GilBinop ILessThanEqual
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ -> GilBinop ILessThanEqual
         | CInteger I_size_t | Pointer _ -> Proc leq_maybe_ptr
         | _ -> Unhandled `With_type)
     | Lt -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) -> GilBinop ILessThan
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ -> GilBinop ILessThan
         | CInteger I_size_t | Pointer _ -> Proc lt_maybe_ptr
         | _ -> Unhandled `With_type)
     | Gt -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ ->
             GilBinop ILessThanEqual ||> fun e -> Expr.Infix.not e
         | CInteger I_size_t | Pointer _ -> Proc gt_maybe_ptr
         | _ -> Unhandled `With_type)
@@ -95,34 +115,40 @@ let compile_binop
         | CInteger I_int, CInteger I_int
         | CInteger I_char, CInteger I_char
         | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IPlus
+        | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
+          when widtha == widthb -> GilBinop IPlus
+        | Signedbv { width = widtha }, Signedbv { width = widthb }
+          when widtha == widthb -> GilBinop IPlus
+        | _ -> Unhandled `With_type)
+    | Minus -> (
+        match (lty, rty) with
+        | (CInteger I_size_t | Pointer _), (CInteger I_size_t | Pointer _) ->
+            Proc sub_maybe_ptr
+        | CInteger I_int, CInteger I_int
+        | CInteger I_char, CInteger I_char
+        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IPlus
+        | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
+          when widtha == widthb -> GilBinop IMinus
+        | Signedbv { width = widtha }, Signedbv { width = widthb }
+          when widtha == widthb -> GilBinop IMinus
         | _ -> Unhandled `With_type)
     | Mult -> (
-        match (lty, rty) with
-        | CInteger I_int, CInteger I_int
-        | CInteger I_char, CInteger I_char
-        | CInteger I_size_t, CInteger I_size_t
-        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop ITimes
+        match lty with
+        | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop ITimes
+        | _ -> Unhandled `With_type)
+    | Div -> (
+        match lty with
+        | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop IDiv
         | _ -> Unhandled `With_type)
     | Mod -> (
-        match (lty, rty) with
-        | CInteger I_int, CInteger I_int
-        | CInteger I_char, CInteger I_char
-        | CInteger I_size_t, CInteger I_size_t
-        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IMod
-        | Unsignedbv { width = width_a }, Unsignedbv { width = width_b }
-          when width_a == width_b -> GilBinop IMod
+        match lty with
+        | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop IMod
         | _ -> Unhandled `With_type)
     | Or -> GilBinop BinOp.BOr
     | And -> GilBinop BinOp.BAnd
-    | OverflowPlus -> (
-        match (lty, rty) with
-        | CInteger I_size_t, CInteger I_size_t
-          when match Ctx.archi ctx with
-               | Arch64 -> true
-               | _ -> false -> Proc overflow_plus_u64
-        | Unsignedbv { width = 64 }, Unsignedbv { width = 64 } ->
-            Proc overflow_plus_u64
-        | _ -> Unhandled `With_type)
+    | OverflowPlus -> GilBinop IPlus ||> int_in_bounds ~ty:lty
+    | OverflowMult -> GilBinop ITimes ||> int_in_bounds ~ty:lty
+    | OverflowMinus -> GilBinop IMinus ||> int_in_bounds ~ty:lty
     | _ -> Unhandled `Without_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
@@ -328,49 +354,63 @@ let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
         let+ () = Cs.unit [ b fail_cmd ] in
         Val_repr.ByCopy { ptr = Lit Nono; type_ }
 
+type cast_with =
+  | App of (Expr.t -> Expr.t)
+  | Nop
+  | Unhandled
+  | Proc of string * Expr.t list
+(* Proc(fname, [a, b]) means to cast e using fname(e, a, b) *)
+
 let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
     Val_repr.t Cs.with_cmds =
+  let from_chunk = Memory.chunk_for_type ~ctx from in
+  let into_chunk = Memory.chunk_for_type ~ctx into in
   let cast_with =
-    match (from, into) with
-    | x, y when GType.equal x y -> `Nop
-    | Bool, CInteger (I_bool | I_char | I_int) ->
-        `Proc Constants.Internal_functions.val_of_bool
-    | CInteger I_int, CInteger (I_size_t | I_ssize_t) ->
-        assert (ctx.machine.pointer_width == 64);
-        (* FIXME: This is incorrect, some mathematical operation should be done *)
-        `Nop
-    | Unsignedbv { width = 32 }, CInteger I_ssize_t -> (
-        match Ctx.archi ctx with
-        | Arch32 -> `Proc Constants.Cast_functions.unsign_int
-        | Arch64 -> `Nop)
-    | CInteger I_int, Unsignedbv { width } when ctx.machine.int_width == width
-      -> `Proc Constants.Cast_functions.unsign_int
-    | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 64
-      -> `Proc Constants.Cast_functions.unsign_int
-    | CInteger I_ssize_t, CInteger I_size_t when ctx.machine.pointer_width == 32
-      -> `Proc Constants.Cast_functions.unsign_int
-    | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 64
-      -> `Proc Constants.Cast_functions.sign_int
-    | CInteger I_size_t, CInteger I_ssize_t when ctx.machine.pointer_width == 32
-      -> `Proc Constants.Cast_functions.sign_int
-    | Unsignedbv { width = 8 | 16 }, CInteger (I_size_t | I_ssize_t) -> `Nop
-    (* We're only considering archi32 and 64, u8 and u16 are
-       guaranteed to fit inside size_t and ssize_t *)
-    | Pointer _, Pointer _ -> `Nop
-    | Pointer _, CInteger I_size_t ->
-        (* One cool thing is that size_t and pointer is the same chunk. *)
-        `Nop
-    | _ -> `Unhandled
+    match (from_chunk, into_chunk) with
+    | None, Some _ -> (
+        (* Special case of casting a boolean into an int.
+           Handled separately because there's no chunk involved there,
+           it's not a real C value. *)
+        match (from, into) with
+        | Bool, (CInteger _ | Unsignedbv _ | Signedbv _) ->
+            Proc (Constants.Internal_functions.val_of_bool, [])
+        | _ -> Unhandled)
+    | _, None -> Unhandled
+    | Some from_chunk, Some into_chunk -> (
+        match (from_chunk, into_chunk) with
+        | x, y when Chunk.equal x y -> Nop
+        (* Casting a value into a bigger chunk doesn't affect the mathematical
+           value, and can always be done *)
+        | (U8 | I8), (U16 | U32 | U64 | U128 | I16 | I32 | I64 | I128)
+        | (U16 | I16), (U32 | U64 | U128 | I32 | I64 | I128)
+        | (U32 | I32), (U64 | U128 | I64 | I128)
+        | (U64 | I64), (U128 | I128) -> Nop
+        | U128, (U64 | U32 | U16 | U8)
+        | U64, (U32 | U16 | U8)
+        | U32, (U16 | U8)
+        | U16, U8 ->
+            let to_mod_z = Expr.int_z Z.(one lsl Chunk.size into_chunk) in
+            App (fun e -> Expr.BinOp (e, IMod, to_mod_z))
+        | I128, U128 | I64, U64 | I32, U32 | I16, U16 | I8, U8 ->
+            let two_power_size = Expr.int_z Z.(one lsl Chunk.size into_chunk) in
+            Proc
+              (Constants.Cast_functions.unsign_int_same_size, [ two_power_size ])
+        | _ -> Unhandled)
   in
   match cast_with with
-  | `Proc function_name ->
+  | Proc (function_name, additional_params) ->
       let function_name = Expr.Lit (String function_name) in
       let e = Val_repr.as_value ~msg:"TypeCast operand" e in
       let temp = Ctx.fresh_v ctx in
-      let call = Cmd.Call (temp, function_name, [ e ], None, None) in
+      let call =
+        Cmd.Call (temp, function_name, e :: additional_params, None, None)
+      in
       Cs.return ~app:[ call ] (Val_repr.ByValue (PVar temp))
-  | `Nop -> Cs.return e
-  | `Unhandled ->
+  | App f ->
+      let e = Val_repr.as_value ~msg:"TypeCast operand" e in
+      Cs.return (Val_repr.ByValue (f e))
+  | Nop -> Cs.return e
+  | Unhandled ->
       let cmd = Helpers.assert_unhandled ~feature:(Cast (from, into)) [] in
       Cs.return ~app:[ cmd ] (Val_repr.dummy ~ctx into)
 
@@ -771,13 +811,7 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         (Val_repr.equal res_then res_else)
         "if branche exprs must be equal";
       Cs.return ~app:[ b ~label:end_lab Skip ] res_then
-  | ByteExtract _ ->
-      unhandled ByteExtract
-      (* let* ce = compile_expr e in
-         match ce with
-         | ByCopy { ptr; type_ } ->
-         | ByValue _ -> Error.code_error "ByteExtract targets should be in memory"
-         | Procedure _ -> Error.code_error "Byte-extracting a procedure") *)
+  | ByteExtract _ -> unhandled ByteExtract
   | Struct elems ->
       let fields = Ctx.resolve_struct_components ctx expr.type_ in
       (* We start by getting the offsets where we need to write,

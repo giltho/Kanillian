@@ -4,81 +4,46 @@ open Delayed.Syntax
 module DO = Delayed_option
 module DR = Delayed_result
 
-type t =
-  | Sptr of string * Expr.t
-  | SVint of Expr.t * Chunk.t
-  | SVfloat of Expr.t * [ `Single | `Double ]
-[@@deriving yojson, eq]
+(* A symbolic value in memory is just an expr, but
+   we maintain an abstraction around it to make sure
+   we properly do sanity checks at the boundaries *)
 
-let pp ft v =
-  let open Fmt in
-  let se = Expr.pp in
-  match v with
-  | Sptr (l, ofs) -> pf ft "Ptr(%s, %a)" l se ofs
-  | SVint (i, c) -> pf ft "(%a: %s)" se i (Chunk.to_string c)
-  | SVfloat (f, c) ->
-      pf ft "(%a: %s)" se f
-        (match c with
-        | `Single -> "f32"
-        | `Double -> "f64")
+type t = Expr.t [@@deriving yojson]
 
-let substitution ~le_subst sv =
-  match sv with
-  | SVint (v, c) -> SVint (le_subst v, c)
-  | SVfloat (v, c) -> SVfloat (le_subst v, c)
-  | Sptr (loc, offs) -> (
-      let loc_e = Expr.loc_from_loc_name loc in
-      match le_subst loc_e with
-      | Expr.ALoc nloc | Lit (Loc nloc) -> Sptr (nloc, le_subst offs)
-      | e ->
-          failwith
-            (Format.asprintf "Heap substitution fail for loc: %a" Expr.pp e))
-
-exception Not_a_C_value of Expr.t
+let alocs e = Expr.alocs e
+let lvars e = Expr.lvars e
+let substitution ~le_subst e = le_subst e
+let equal a b = Expr.equal a b
+let pp ft t = Expr.pp ft t
+let to_gil_expr t = t
 
 let zero_of_chunk (chunk : Chunk.t) =
   match chunk with
-  | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 ->
-      SVint (Expr.zero_i, chunk)
-  | F32 -> SVfloat (Lit (Num 0.), `Single)
-  | F64 -> SVfloat (Lit (Num 0.), `Double)
+  | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 -> Expr.zero_i
+  | F32 -> Lit (Num 0.)
+  | F64 -> Lit (Num 0.)
 
-let any_of_chunk (chunk : Chunk.t) : t Delayed.t =
+let any_of_chunk (chunk : Chunk.t) : Expr.t Delayed.t =
   let lvar = LVar.alloc () in
   let lvar_e = Expr.LVar lvar in
-  match chunk with
-  | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 ->
-      let learned_types = [ (lvar, Type.IntType) ] in
-      let learned =
-        match Chunk.bounds chunk with
-        | Some (low, high) ->
-            let open Formula.Infix in
-            [ lvar_e #>= (Expr.int_z low); lvar_e #<= (Expr.int_z high) ]
-        | None -> []
-      in
-      Delayed.return ~learned_types ~learned (SVint (lvar_e, chunk))
-  | F32 ->
-      let learned_types = [ (lvar, Type.NumberType) ] in
-      let learned = [] in
-      Delayed.return ~learned_types ~learned (SVfloat (lvar_e, `Single))
-  | F64 ->
-      let learned_types = [ (lvar, Type.NumberType) ] in
-      let learned = [] in
-      Delayed.return ~learned_types ~learned (SVfloat (lvar_e, `Double))
-
-let lvars =
-  let open Utils.Containers in
-  function
-  | Sptr (_, e) -> Expr.lvars e
-  | SVint (e, _) | SVfloat (e, _) -> Expr.lvars e
-
-let alocs =
-  let open Utils.Containers in
-  function
-  | Sptr (l, e) ->
-      let alocs_e = Expr.alocs e in
-      if Utils.Names.is_aloc_name l then SS.add l alocs_e else alocs_e
-  | SVint (e, _) | SVfloat (e, _) -> Expr.alocs e
+  let learned_types, learned =
+    match chunk with
+    | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128 ->
+        let learned_types = [ (lvar, Type.IntType) ] in
+        let learned =
+          match Chunk.bounds chunk with
+          | Some (low, high) ->
+              let open Formula.Infix in
+              [ lvar_e #>= (Expr.int_z low); lvar_e #<= (Expr.int_z high) ]
+          | None -> []
+        in
+        (learned_types, learned)
+    | F32 | F64 ->
+        let learned_types = [ (lvar, Type.NumberType) ] in
+        let learned = [] in
+        (learned_types, learned)
+  in
+  Delayed.return ~learned_types ~learned lvar_e
 
 module Patterns = struct
   open Formula.Infix
@@ -101,76 +66,70 @@ module Patterns = struct
     #&& ((typeof (list_nth x 1)) #== (type_ IntType))
 end
 
+(* Raise this exception when the right types
+   haven't been correctly assumed. *)
+exception Not_a_C_value of Expr.t
+
+let () =
+  Printexc.register_printer (function
+    | Not_a_C_value e ->
+        Some
+          (Format.asprintf "Storing this value, it's not a C value: %a" Expr.pp
+             e)
+    | _ -> None)
+
 let of_chunk_and_expr (chunk : Chunk.t) sval_e =
   let open Patterns in
   let return = Delayed.return in
   let* sval_e = Delayed.reduce sval_e in
-  let assert_type ty = Delayed.assert_type sval_e ty (Not_a_C_value sval_e) in
-  let svint ?learned () = return ?learned (SVint (sval_e, chunk)) in
-  let sptr ?learned l o = return ?learned (Sptr (l, o)) in
+  let exn = Not_a_C_value sval_e in
+  let assert_type ty = Delayed.assert_type sval_e ty exn in
+  let error () = raise exn in
+  let in_bounds e =
+    match Chunk.bounds chunk with
+    | Some (low, high) ->
+        let open Formula.Infix in
+        e #>= (Expr.int_z low) #&& (e #<= (Expr.int_z high))
+    | None -> True
+  in
   match (chunk, !Kconfig.archi) with
   | U64, Arch64 | U32, Arch32 ->
-      let* is_int = Delayed.has_type sval_e IntType in
-      if is_int then svint ()
+      (* It has to be either an integer or a pointer *)
+      if%ent integer sval_e then
+        if%ent in_bounds sval_e then return sval_e else error ()
       else
-        let* () = Delayed.assert_ (obj sval_e) (Not_a_C_value sval_e) in
-        let loc_expr = Expr.list_nth sval_e 0 in
-        let ofs = Expr.list_nth sval_e 1 in
-        let* ofs = Delayed.reduce ofs in
-        let* loc_opt = Delayed.resolve_loc loc_expr in
-        let loc, learned =
-          match loc_opt with
-          | Some l -> (l, [])
-          | None ->
-              let aloc = ALoc.alloc () in
-              let learned =
-                let open Formula.Infix in
-                [ loc_expr #== (ALoc aloc) ]
-              in
-              (aloc, learned)
-        in
-        sptr ~learned loc ofs
+        if%ent obj sval_e then
+          let loc_expr = Expr.list_nth sval_e 0 in
+          let ofs = Expr.list_nth sval_e 1 in
+          let* ofs = Delayed.reduce ofs in
+          let* loc_opt = Delayed.resolve_loc loc_expr in
+          let loc, learned =
+            match loc_opt with
+            | Some l -> (Expr.loc_from_loc_name l, [])
+            | None ->
+                let aloc = Expr.ALoc (ALoc.alloc ()) in
+                let learned =
+                  let open Formula.Infix in
+                  [ loc_expr #== aloc ]
+                in
+                (aloc, learned)
+          in
+          return ~learned (Expr.EList [ loc; ofs ])
+        else raise (Not_a_C_value sval_e)
   | (U8 | I8 | U16 | I16 | I32 | U32 | I64 | U64 | I128 | U128), _ ->
       let* () = assert_type IntType in
-      let open Formula.Infix in
-      let i k = Expr.int k in
-      let learned =
-        match chunk with
-        | U8 -> [ (i 0) #<= sval_e; sval_e #<= (i 255) ]
-        | _ -> []
-      in
-      svint ~learned ()
+      let+ () = Delayed.assert_ (in_bounds sval_e) exn in
+      sval_e
   | F64, _ ->
-      let* () = assert_type NumberType in
-      return (SVfloat (sval_e, `Double))
+      let+ () = assert_type NumberType in
+      sval_e
   | F32, _ ->
-      let* () = assert_type NumberType in
-      return (SVfloat (sval_e, `Single))
-
-let to_gil_expr_undelayed sval =
-  let open Expr in
-  match sval with
-  | Sptr (loc_name, offset) ->
-      let loc = loc_from_loc_name loc_name in
-      (EList [ loc; offset ], [ (loc, Type.ObjectType); (offset, Type.IntType) ])
-  | SVint (n, _) -> (n, [ (n, Type.IntType) ])
-  | SVfloat (n, _) -> (n, [ (n, Type.NumberType) ])
-
-let to_gil_expr sval =
-  let exp, typings = to_gil_expr_undelayed sval in
-  let typing_pfs =
-    List.map
-      (fun (e, t) ->
-        let open Expr in
-        let open Formula.Infix in
-        (typeof e) #== (type_ t))
-      typings
-  in
-  Delayed.return ~learned:typing_pfs exp
+      let+ () = assert_type NumberType in
+      sval_e
 
 let sure_is_zero = function
-  | SVint (Lit (Int z), _) when Z.equal z Z.zero -> true
-  | SVfloat (Lit (Num 0.), _) -> true
+  | Expr.Lit (Int z) when Z.equal z Z.zero -> true
+  | Lit (Num 0.) -> true
   | _ -> false
 
 module SVArray = struct
@@ -219,26 +178,6 @@ module SVArray = struct
     | Arr a, Arr b -> Expr.equal a b
     | AllUndef, AllUndef | AllZeros, AllZeros -> true
     | _ -> false
-
-  let conc_to_abst_undelayed conc =
-    let rev_l, gamma =
-      List.fold_left
-        (fun (acc, gamma) sval ->
-          let new_el, new_gamma = to_gil_expr_undelayed sval in
-          (new_el :: acc, new_gamma @ gamma))
-        ([], []) conc
-    in
-    let learned =
-      List.map
-        (let open Formula.Infix in
-        fun (e, t) -> (Expr.typeof e) #== (Expr.type_ t))
-        gamma
-    in
-    (Expr.EList (List.rev rev_l), learned)
-
-  let conc_to_abst conc =
-    let e, learned = conc_to_abst_undelayed conc in
-    Delayed.return ~learned e
 
   let undefined_pf ?size arr_exp =
     let size =
@@ -331,17 +270,14 @@ module SVArray = struct
   (** This already assumes the value is a number and not a pointer *)
   let to_single_value ~chunk = function
     | Arr (EList [ a ]) ->
+        (* What's inside is technically already an sval,
+           be we don't check sometimes so we might as well here.. *)
         let+ v = of_chunk_and_expr chunk a in
         Some v
     | AllZeros -> DO.some (zero_of_chunk chunk)
     | _ -> DO.none ()
 
-  let singleton = function
-    (* Assuming that the chunk is correct already *)
-    | SVfloat (e, _) | SVint (e, _) -> Arr (Expr.EList [ e ])
-    | Sptr _ as ptr ->
-        let e_ptr, _ = to_gil_expr_undelayed ptr in
-        Arr (Expr.EList [ e_ptr ])
+  let singleton e = Arr (Expr.EList [ e ])
 
   let array_sub arr o len : t =
     match arr with
@@ -350,7 +286,7 @@ module SVArray = struct
     | Arr e -> Arr (Expr.list_sub ~lst:e ~start:o ~size:len)
 
   (** This assumes chunks are properly respected outside of the call of this function *)
-  let array_cons (el : sval) arr = concat (singleton el) arr
+  let array_cons (el : Expr.t) arr = concat (singleton el) arr
 
   let array_append arr el = concat arr (singleton el)
 
@@ -399,7 +335,7 @@ module SVArray = struct
     let e, learned = to_gil_expr_undelayed ~chunk ~range svarr in
     Delayed.return ~learned e
 
-  let of_gil_expr_exn expr = Arr expr
+  let of_gil_expr_exn expr = (* TODO: at type sanity check here *) Arr expr
 
   (** Only call on Mint8Unsigned arrays *)
   let learn_chunk ~chunk ~size arr =
