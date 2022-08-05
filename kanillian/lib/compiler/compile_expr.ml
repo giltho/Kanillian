@@ -25,9 +25,8 @@ let dummy_access ~ctx type_ =
 
 type binop_comp =
   | GilBinop of BinOp.t
-  | App of (Expr.t -> Expr.t -> Expr.t)
   | Proc of string
-  | Then of (binop_comp * (Expr.t -> Expr.t))
+  | Then of (binop_comp * (Expr.t -> Expr.t Cs.with_cmds))
   | Unhandled of [ `With_type | `Without_type ]
 
 let compile_binop
@@ -41,7 +40,8 @@ let compile_binop
      then we'll figure out a bit more.
      This is for size_t and pointer operations. *)
   assert (Machine_model.(equal archi64 ctx.machine));
-  let ( ||> ) comp f = Then (comp, f) in
+  let ( |||> ) comp f = Then (comp, f) in
+  let ( ||> ) comp f = Then (comp, fun e -> Cs.return (f e)) in
   let int_in_bounds ~ty e =
     let error () =
       Error.code_error (Fmt.str "int_in_bounds for non-int: %a" GType.pp ty)
@@ -56,7 +56,19 @@ let compile_binop
     in
     let ( <= ) a b = Expr.BinOp (a, ILessThanEqual, b) in
     let ( && ) a b = Expr.BinOp (a, BAnd, b) in
-    Expr.Infix.not (Expr.int_z low <= e && e <= Expr.int_z high)
+    Expr.int_z low <= e && e <= Expr.int_z high
+  in
+  let assert_int_in_bounds ~ty e =
+    let expr_cond = int_in_bounds ~ty e in
+    let formula =
+      match Formula.lift_logic_expr expr_cond with
+      | Some (f, _) -> f
+      | _ ->
+          Error.code_error
+            "created bound condition that cannot be lifted to formula"
+    in
+    let cmd = Cmd.Logic (LCmd.Assert formula) in
+    Cs.return ~app:[ cmd ] e
   in
   let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
@@ -71,8 +83,7 @@ let compile_binop
     | Notequal -> (
         match lty with
         | CInteger (I_int | I_char | I_bool | I_ssize_t)
-        | Unsignedbv _ | Signedbv _ ->
-            GilBinop BinOp.Equal ||> fun e -> Expr.Infix.not e
+        | Unsignedbv _ | Signedbv _ -> GilBinop BinOp.Equal ||> Expr.Infix.not
         | CInteger I_size_t | Pointer _ -> Proc neq_maybe_ptr
         | _ -> Unhandled `With_type)
     | IeeeFloatEqual -> (
@@ -81,7 +92,7 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | IeeeFloatNotequal -> (
         match lty with
-        | Float | Double -> GilBinop Equal ||> fun e -> Expr.Infix.not e
+        | Float | Double -> GilBinop Equal ||> Expr.Infix.not
         | _ -> Unhandled `With_type)
     | Le -> (
         match lty with
@@ -104,7 +115,8 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Ge -> (
         match lty with
-        | CInteger (I_int | I_char | I_bool | I_ssize_t) ->
+        | CInteger (I_int | I_char | I_bool | I_ssize_t)
+        | Unsignedbv _ | Signedbv _ ->
             GilBinop ILessThan ||> fun e -> Expr.Infix.not e
         | CInteger I_size_t | Pointer _ -> Proc geq_maybe_ptr
         | _ -> Unhandled `With_type)
@@ -114,11 +126,14 @@ let compile_binop
             Proc add_maybe_ptr
         | CInteger I_int, CInteger I_int
         | CInteger I_char, CInteger I_char
-        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IPlus
+        | CInteger I_ssize_t, CInteger I_ssize_t ->
+            GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
-          when widtha == widthb -> GilBinop IPlus
+          when widtha == widthb ->
+            GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | Signedbv { width = widtha }, Signedbv { width = widthb }
-          when widtha == widthb -> GilBinop IPlus
+          when widtha == widthb ->
+            GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Minus -> (
         match (lty, rty) with
@@ -126,19 +141,24 @@ let compile_binop
             Proc sub_maybe_ptr
         | CInteger I_int, CInteger I_int
         | CInteger I_char, CInteger I_char
-        | CInteger I_ssize_t, CInteger I_ssize_t -> GilBinop IPlus
+        | CInteger I_ssize_t, CInteger I_ssize_t ->
+            GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
-          when widtha == widthb -> GilBinop IMinus
+          when widtha == widthb ->
+            GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
         | Signedbv { width = widtha }, Signedbv { width = widthb }
-          when widtha == widthb -> GilBinop IMinus
+          when widtha == widthb ->
+            GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Mult -> (
         match lty with
-        | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop ITimes
+        | CInteger _ | Unsignedbv _ | Signedbv _ ->
+            GilBinop ITimes |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Div -> (
         match lty with
-        | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop IDiv
+        | CInteger _ | Unsignedbv _ | Signedbv _ ->
+            GilBinop IDiv |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Mod -> (
         match lty with
@@ -146,22 +166,24 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Or -> GilBinop BinOp.BOr
     | And -> GilBinop BinOp.BAnd
-    | OverflowPlus -> GilBinop IPlus ||> int_in_bounds ~ty:lty
-    | OverflowMult -> GilBinop ITimes ||> int_in_bounds ~ty:lty
-    | OverflowMinus -> GilBinop IMinus ||> int_in_bounds ~ty:lty
+    | OverflowPlus ->
+        GilBinop IPlus ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
+    | OverflowMult ->
+        GilBinop ITimes ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
+    | OverflowMinus ->
+        GilBinop IMinus ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
     | _ -> Unhandled `Without_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
   let rec compute = function
-    | Then (b, f) -> Cs.map f (compute b)
+    | Then (b, f) -> Cs.bind (compute b) f
     | Proc internal_function ->
         let gvar = Ctx.fresh_v ctx in
         let call =
           Cmd.Call (gvar, Lit (String internal_function), [ e1; e2 ], None, None)
         in
         Cs.return ~app:[ call ] (Expr.PVar gvar)
-    | App f -> Cs.return (f e1 e2)
     | GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
     | Unhandled wt ->
         let type_info =

@@ -474,28 +474,68 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
       proc_spec;
     }
 
-let start_for_harness harness =
-  let init_call =
-    let init_f = Constants.CBMC_names.initialize in
-    Body_item.make (Cmd.Call ("u", Lit (String init_f), [], None, None))
-  in
-  let harness = Sanitize.sanitize_symbol harness in
-  let harness_call =
-    Body_item.make
-      (Cmd.Call
-         (Utils.Names.return_variable, Lit (String harness), [], None, None))
-  in
-  let return = Body_item.make Cmd.ReturnNormal in
-  let body = [| init_call; harness_call; return |] in
-  Proc.
+let start_for_harness ~ctx (harness : Program.Func.t) =
+  let cprover_start =
+    let open Program.Func in
+    let stmt stmt_body =
+      Stmt.{ location = harness.location; body = stmt_body }
+    in
+    let expr type_ expr_value =
+      GExpr.{ location = harness.location; type_; value = expr_value }
+    in
+    let harness_type =
+      GType.Code { params = harness.params; return_type = harness.return_type }
+    in
+    let params, params_decls =
+      List.split
+      @@ List.map
+           (fun (p : Param.t) ->
+             let ident =
+               match p.identifier with
+               | None -> Ctx.fresh_v ctx
+               | Some ident -> ident
+             in
+             let lhs = expr p.type_ (Symbol ident) in
+             let value = Some (expr p.type_ Nondet) in
+             (expr p.type_ (Symbol ident), stmt @@ Stmt.Decl { lhs; value }))
+           harness.params
+    in
+    let cprover_init_type = GType.Code { params = []; return_type = Empty } in
     {
-      proc_name = Constants.CBMC_names.start;
-      proc_source_path = None;
-      proc_internal = true;
-      proc_body = body;
-      proc_params = [];
-      proc_spec = None;
+      symbol = Constants.CBMC_names.start;
+      params = [];
+      return_type = Empty;
+      body =
+        Some
+          (stmt
+          @@ Block
+               ([
+                  (* First call __CPROVER__initialize*)
+                  stmt
+                  @@ FunctionCall
+                       {
+                         lhs = None;
+                         func =
+                           expr cprover_init_type
+                             (Symbol Constants.CBMC_names.initialize);
+                         args = [];
+                       };
+                ]
+               @ params_decls
+               @ [
+                   stmt
+                   @@ FunctionCall
+                        {
+                          lhs = None;
+                          func = expr harness_type (Symbol harness.symbol);
+                          args = params;
+                        };
+                   stmt @@ Return None;
+                 ]));
+      location = harness.location;
     }
+  in
+  compile_function ~ctx cprover_start
 
 let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   let program = context.prog in
@@ -513,7 +553,14 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
   let gil_prog =
     Option.fold ~none:gil_prog
       ~some:(fun harness ->
-        let gil_prog = Prog.add_proc gil_prog (start_for_harness harness) in
+        let harness =
+          match Hashtbl.find_opt program.funs harness with
+          | Some f -> f
+          | None -> Error.user_error (Fmt.str "Missing harness %s" harness)
+        in
+        let gil_prog =
+          Prog.add_proc gil_prog (start_for_harness ~ctx:context harness)
+        in
         gil_prog)
       context.harness
   in
