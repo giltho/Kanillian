@@ -1,7 +1,8 @@
 #internal
 
 proc i__archi_usize_bounds() {
-  ret := {{ 0i, 18446744073709551615i }}
+  ret := {{ 0i, 18446744073709551615i }};
+  return
 };
 
 proc i__ptr_chunk() {

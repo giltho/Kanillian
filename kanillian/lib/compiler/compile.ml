@@ -137,7 +137,9 @@ let compile_free_locals (ctx : Ctx.t) =
   let () =
     Hashtbl.filter_map_inplace
       (fun symbol (local : Ctx.Local.t) ->
-        if Ctx.in_memory ctx symbol then Some local else None)
+        if Ctx.in_memory ctx symbol && not (Ctx.is_zst_access ctx local.type_)
+        then Some local
+        else None)
       locals
   in
   Hashtbl.to_seq_values locals

@@ -42,6 +42,7 @@ end
 
 module Cast_functions = struct
   let unsign_int_same_size = "i__cast_unsign_int_same_size"
+  let sign_int_same_size = "i__cast_sign_int_same_size"
 end
 
 module Internal_Predicates = struct

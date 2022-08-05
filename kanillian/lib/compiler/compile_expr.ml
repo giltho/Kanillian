@@ -280,9 +280,10 @@ let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
           | [] -> Seq.Nil
           | Datatype_component.Padding { bits; _ } :: fields ->
               (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
-              let width = bits / 8 in
+              let byte_width = bits / 8 in
               Cons
-                ((curr, Val_repr.Poison { width }), writes (curr + width) fields)
+                ( (curr, Val_repr.Poison { byte_width }),
+                  writes (curr + byte_width) fields )
           | Field { type_; _ } :: fields ->
               let rest = writes (curr + Ctx.size_of ctx type_) fields in
               if Ctx.is_zst_access ctx type_ then rest ()
@@ -414,9 +415,13 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
             let to_mod_z = Expr.int_z Z.(one lsl Chunk.size into_chunk) in
             App (fun e -> Expr.BinOp (e, IMod, to_mod_z))
         | I128, U128 | I64, U64 | I32, U32 | I16, U16 | I8, U8 ->
-            let two_power_size = Expr.int_z Z.(one lsl Chunk.size into_chunk) in
+            let two_power_size = Z.(one lsl Chunk.size into_chunk) in
+            let imax = Expr.int_z Z.((two_power_size asr 1) - one) in
+            let two_power_size = Expr.int_z two_power_size in
             Proc
-              (Constants.Cast_functions.unsign_int_same_size, [ two_power_size ])
+              ( Constants.Cast_functions.unsign_int_same_size,
+                [ imax; two_power_size ] )
+        | U8, I8 | U16, I16 | U32, I32 | U64, I64 | U128, I128 -> Nop
         | _ -> Unhandled)
   in
   match cast_with with
@@ -489,7 +494,7 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
               (* In the read case, some validity should be checked *)
               Cs.return (InMemoryComposit { ptr = ge; type_ = lvalue.type_ })
             else if read then
-              let+ v = Memory.load_scalar ~ctx ge e.type_ |> Cs.map_l b in
+              let+ v = Memory.load_scalar ~ctx ge lvalue.type_ |> Cs.map_l b in
               InMemoryScalar { ptr = ge; loaded = Some (PVar v) }
             else Cs.return (InMemoryScalar { ptr = ge; loaded = None })
         | ByCopy _ | ByCompositValue _ ->
@@ -685,6 +690,14 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         by_copy ~app:[ b gil_call ] temp_arg return_type
 
 and compile_assign ~ctx ~annot ~lhs ~rhs =
+  let () =
+    match lhs with
+    | GExpr.{ value = Symbol "m___RNvCs9jmnlWkFcUy_7result33foo__1__var_0"; _ }
+      ->
+        Fmt.pr "Compiling that assignment: %a : %a := %a : %a\n\n@?" GExpr.pp
+          lhs GType.pp lhs.type_ GExpr.pp rhs GType.pp rhs.type_
+    | _ -> ()
+  in
   let v, pre1 = compile_expr ~ctx rhs in
   let access, pre2 = lvalue_as_access ~ctx ~read:false lhs in
   let write =
@@ -761,7 +774,22 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       let* access = lvalue_as_access ~ctx ~read:true x in
       match access with
       | ZST ->
-          unhandled ZstAddress
+          (* FIXME: we can't model alignment yet *)
+          let* ptr =
+            nondet_expr ~ctx ~loc:expr.location ~type_:(CInteger I_size_t) ()
+          in
+          let ptr =
+            Val_repr.as_value ~msg:"Nondet I_size_t for ZST pointer" ptr
+          in
+          (* We need to assert that the ZST pointer is not null.
+             If the null pointer is not zero, I don't know what to do.
+          *)
+          assert ctx.machine.null_is_zero;
+          let assume =
+            let open Formula.Infix in
+            b (Cmd.Logic (Assume (fnot ptr #== Expr.zero_i)))
+          in
+          Cs.return ~app:[ assume ] (Val_repr.ByValue ptr)
           (* Should probably just return a long, with a nondet value that has the right offset *)
       | InMemoryScalar { ptr; _ }
       | InMemoryComposit { ptr; _ }
@@ -833,7 +861,28 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         (Val_repr.equal res_then res_else)
         "if branche exprs must be equal";
       Cs.return ~app:[ b ~label:end_lab Skip ] res_then
-  | ByteExtract _ -> unhandled ByteExtract
+  | ByteExtract { e; offset } ->
+      let* e_repr = compile_expr e in
+      let* ptr_to_read =
+        match e_repr with
+        | ByCopy { ptr; _ } -> Cs.return ptr
+        | ByValue _ | ByCompositValue _ ->
+            let* ptr =
+              Memory.alloc_temp ~ctx ~location:expr.location e.type_
+              |> Cs.map_l b
+            in
+            let write =
+              Memory.write ~ctx ~annot:(b ~loop:[]) ~type_:e.type_ ~dst:ptr
+                ~src:e_repr
+            in
+            Cs.return ~app:write ptr
+        | Procedure _ -> Error.unexpected "Byte extracting a function"
+      in
+      let new_ptr = Memory.ptr_add ptr_to_read offset in
+      if Ctx.representable_in_store ctx expr.type_ then
+        let* var = Memory.load_scalar ~ctx new_ptr expr.type_ |> Cs.map_l b in
+        by_value (PVar var)
+      else by_copy new_ptr expr.type_
   | Struct elems ->
       let fields = Ctx.resolve_struct_components ctx expr.type_ in
       (* We start by getting the offsets where we need to write,
@@ -844,10 +893,10 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         | Datatype_component.Padding { bits; _ } :: fields, _ :: elems
         (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
           ->
-            let width = bits / 8 in
+            let byte_width = bits / 8 in
             Cons
-              ( (curr, Val_repr.Poison { width }),
-                writes (curr + width) fields elems )
+              ( (curr, Val_repr.Poison { byte_width }),
+                writes (curr + byte_width) fields elems )
         | Field { type_; _ } :: fields, _ :: elems
           when Ctx.is_zst_access ctx type_ ->
             (* If the field is a ZST, we simply ignore it *)

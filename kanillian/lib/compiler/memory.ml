@@ -3,24 +3,29 @@ module GType = Goto_lib.Type
 module Interface = Memory_model.Interface
 
 let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
-  match t with
-  | CInteger I_bool ->
-      Chunk.of_int_type ~signed:false ~size:ctx.machine.bool_width
-  | CInteger I_char ->
-      Chunk.of_int_type
-        ~signed:(not ctx.machine.char_is_unsigned)
-        ~size:ctx.machine.char_width
-  | CInteger I_int -> Chunk.of_int_type ~signed:true ~size:ctx.machine.int_width
-  | CInteger I_size_t ->
-      Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
-  | CInteger I_ssize_t ->
-      Chunk.of_int_type ~signed:true ~size:ctx.machine.pointer_width
-  | Signedbv { width } -> Chunk.of_int_type ~signed:true ~size:width
-  | Unsignedbv { width } -> Chunk.of_int_type ~signed:false ~size:width
-  | Float -> Some F32
-  | Double -> Some F64
-  | Pointer _ -> Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
-  | _ -> None
+  let res =
+    match t with
+    | CInteger I_bool ->
+        Chunk.of_int_type ~signed:false ~size:ctx.machine.bool_width
+    | CInteger I_char ->
+        Chunk.of_int_type
+          ~signed:(not ctx.machine.char_is_unsigned)
+          ~size:ctx.machine.char_width
+    | CInteger I_int ->
+        Chunk.of_int_type ~signed:true ~size:ctx.machine.int_width
+    | CInteger I_size_t ->
+        Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
+    | CInteger I_ssize_t ->
+        Chunk.of_int_type ~signed:true ~size:ctx.machine.pointer_width
+    | Signedbv { width } -> Chunk.of_int_type ~signed:true ~size:width
+    | Unsignedbv { width } -> Chunk.of_int_type ~signed:false ~size:width
+    | Float -> Some F32
+    | Double -> Some F64
+    | Pointer _ ->
+        Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
+    | _ -> None
+  in
+  res
 
 let ptr_add_e p e =
   let loc = Expr.list_nth p 0 in
@@ -125,12 +130,13 @@ let memcpy ~ctx ~(type_ : GType.t) ~(dst : Expr.t) ~(src : Expr.t) =
       None,
       None )
 
-(* let write_composit
-     ~ctx
-     ~(type_ : GType.t)
-     ~(dst : Expr.t)
-     (writes : (int * Val_repr.t Cs.with_cmds) Seq.t) : string Cmd.t list =
-   [] *)
+let poison ~ctx ~(dst : Expr.t) byte_width =
+  let temp = Ctx.fresh_v ctx in
+  let size = Expr.int byte_width in
+  let loc = Expr.list_nth dst 0 in
+  let offset = Expr.list_nth dst 1 in
+  let poison = Interface.(str_ac (AMem Poison)) in
+  Cmd.LAction (temp, poison, [ loc; offset; size ])
 
 let write_composit
     ~ctx
@@ -143,12 +149,10 @@ let write_composit
   let rec aux start_ofs writes =
     match writes () with
     | Seq.Nil -> []
-    | Cons ((_, Val_repr.Poison _), rest) ->
-        (* TODO: Once poison is implemented in Gillian-C,
-           a poison write should actively poison memory.
-           Maybe Poison should directly be a variant of Val_repr, but maybe not.
-           To be understood *)
-        aux start_ofs rest
+    | Cons ((i, Val_repr.Poison { byte_width }), rest) ->
+        let curr_ofs = start_ofs + i in
+        let cmds = poison ~ctx ~dst:(at_ofs curr_ofs) byte_width in
+        annot cmds :: aux start_ofs rest
     | Cons ((i, V { type_ = ty; value = v, body }), rest) ->
         let curr_ofs = start_ofs + i in
         let dst = at_ofs curr_ofs in

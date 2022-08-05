@@ -11,7 +11,7 @@ end
 
 type composit_write =
   | V of { type_ : GType.t; value : t Cs.with_body }
-  | Poison of { width : int }
+  | Poison of { byte_width : int }
 
 and t =
   | ByCopy of { ptr : Expr.t; type_ : GType.t }
