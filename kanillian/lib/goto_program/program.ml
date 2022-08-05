@@ -50,10 +50,7 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
   symtab
   |> Hashtbl.iter (fun name (sym : Irep_lib.Symbol.t) ->
          (* A bit hacky, not sure which should be kept and which shouldn't... *)
-         if
-           (not (String.equal name "return'"))
-           && (sym.is_file_local || should_be_filtered name)
-         then ()
+         if should_be_filtered name then ()
          else
            let location = Location.of_irep sym.location in
            let type_ = Type.of_irep ~machine sym.type_ in
@@ -79,17 +76,20 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
                  in
                  Hashtbl.add env.funs name func
              | _ ->
-                 let value =
-                   match value with
-                   | SVNone -> None
-                   | Expr e -> Some e
-                   | _ ->
-                       Gerror.unexpected "variable value is not an expression"
-                 in
-                 let var =
-                   Global_var.{ symbol = name; type_; value; location }
-                 in
-                 Hashtbl.add env.vars name var);
+                 if not (sym.is_static_lifetime || String.equal name "return'")
+                 then ()
+                 else
+                   let value =
+                     match value with
+                     | SVNone -> None
+                     | Expr e -> Some e
+                     | _ ->
+                         Gerror.unexpected "variable value is not an expression"
+                   in
+                   let var =
+                     Global_var.{ symbol = name; type_; value; location }
+                   in
+                   Hashtbl.add env.vars name var);
   env
 
 let fold_functions f prog acc = Hashtbl.fold f prog.funs acc
