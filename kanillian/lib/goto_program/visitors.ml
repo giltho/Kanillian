@@ -51,10 +51,10 @@ class ['a] iter =
     method visit_expr_value ~(ctx : 'a) ~type_:_ (ev : Expr.value) =
       match ev with
       | Array l | Struct l -> List.iter (self#visit_expr ~ctx) l
-      | Assign { lhs; rhs } ->
+      | EAssign { lhs; rhs } ->
           self#visit_expr ~ctx lhs;
           self#visit_expr ~ctx rhs
-      | FunctionCall { func; args } ->
+      | EFunctionCall { func; args } ->
           self#visit_expr ~ctx func;
           List.iter (self#visit_expr ~ctx) args
       | BinOp { op; lhs; rhs } ->
@@ -74,6 +74,7 @@ class ['a] iter =
           self#visit_expr ~ctx cond;
           self#visit_expr ~ctx then_;
           self#visit_expr ~ctx else_
+      | StatementExpression stmts -> List.iter (self#visit_stmt ~ctx) stmts
       | Nondet
       | Symbol _
       | IntConstant _
@@ -83,7 +84,7 @@ class ['a] iter =
       | StringConstant _
       | DoubleConstant _
       | FloatConstant _
-      | Unhandled _ -> ()
+      | EUnhandled _ -> ()
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
       self#visit_location ~ctx e.location;
@@ -95,10 +96,10 @@ class ['a] iter =
       | Decl { lhs; value } ->
           self#visit_expr ~ctx lhs;
           Option.iter (self#visit_expr ~ctx) value
-      | Assign { lhs; rhs } ->
+      | SAssign { lhs; rhs } ->
           self#visit_expr ~ctx lhs;
           self#visit_expr ~ctx rhs
-      | FunctionCall { lhs; func; args } ->
+      | SFunctionCall { lhs; func; args } ->
           Option.iter (self#visit_expr ~ctx) lhs;
           self#visit_expr ~ctx func;
           List.iter (self#visit_expr ~ctx) args
@@ -121,10 +122,10 @@ class ['a] iter =
       | Output { msg; value } ->
           self#visit_expr ~ctx msg;
           self#visit_expr ~ctx value
-      | Goto _ | Skip | Unhandled _ | Break -> ()
+      | Goto _ | Skip | SUnhandled _ | Break -> ()
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =
-      self#visit_location ~ctx stmt.location;
+      self#visit_location ~ctx stmt.stmt_location;
       self#visit_stmt_body ~ctx stmt.body
   end
 
@@ -237,23 +238,23 @@ class ['a] map =
           let changed = ref false in
           let new_elems = map_mark_changed ~changed (self#visit_expr ~ctx) l in
           if not !changed then ev else Array new_elems
-      | Assign { lhs; rhs } ->
+      | EAssign { lhs; rhs } ->
           let new_lhs = self#visit_expr ~ctx lhs in
           let new_rhs = self#visit_expr ~ctx rhs in
           if new_lhs == lhs && new_rhs == rhs then ev
-          else Assign { lhs = new_lhs; rhs = new_rhs }
+          else EAssign { lhs = new_lhs; rhs = new_rhs }
       | Struct l ->
           let changed = ref false in
           let new_elems = map_mark_changed ~changed (self#visit_expr ~ctx) l in
           if not !changed then ev else Struct new_elems
-      | FunctionCall { func; args } ->
+      | EFunctionCall { func; args } ->
           let new_func = self#visit_expr ~ctx func in
           let changed = ref false in
           let new_args =
             map_mark_changed ~changed (self#visit_expr ~ctx) args
           in
           if (not !changed) && new_func == func then ev
-          else FunctionCall { func = new_func; args = new_args }
+          else EFunctionCall { func = new_func; args = new_args }
       | BinOp { op; lhs; rhs } ->
           let new_op = self#visit_binop ~ctx op in
           let new_lhs = self#visit_expr ~ctx lhs in
@@ -291,6 +292,12 @@ class ['a] map =
           let new_else = self#visit_expr ~ctx else_ in
           if new_cond == cond && new_then == then_ && new_else == else_ then ev
           else If { cond = new_cond; then_ = new_then; else_ = new_else }
+      | StatementExpression stmts ->
+          let changed = ref false in
+          let new_stmts =
+            map_mark_changed ~changed (self#visit_stmt ~ctx) stmts
+          in
+          if not !changed then ev else StatementExpression new_stmts
       | Nondet
       | Symbol _
       | IntConstant _
@@ -300,7 +307,7 @@ class ['a] map =
       | StringConstant _
       | DoubleConstant _
       | FloatConstant _
-      | Unhandled _ -> ev
+      | EUnhandled _ -> ev
 
     method visit_expr ~(ctx : 'a) (e : Expr.t) =
       let new_value = self#visit_expr_value ~ctx ~type_:e.type_ e.value in
@@ -320,11 +327,11 @@ class ['a] map =
           let new_value = option_map_preserve (self#visit_expr ~ctx) value in
           if new_lhs == lhs && new_value == value then body
           else Decl { lhs = new_lhs; value = new_value }
-      | Assign { lhs; rhs } ->
+      | SAssign { lhs; rhs } ->
           let new_lhs = self#visit_expr ~ctx lhs in
           let new_rhs = self#visit_expr ~ctx rhs in
           if new_lhs == lhs && new_rhs == rhs then body
-          else Assign { lhs = new_lhs; rhs = new_rhs }
+          else SAssign { lhs = new_lhs; rhs = new_rhs }
       | Assume { cond } ->
           let new_cond = self#visit_expr ~ctx cond in
           if new_cond == cond then body else Assume { cond = new_cond }
@@ -346,7 +353,7 @@ class ['a] map =
       | Return e ->
           let new_e = option_map_preserve (self#visit_expr ~ctx) e in
           if new_e == e then body else Return new_e
-      | FunctionCall { lhs; func; args } ->
+      | SFunctionCall { lhs; func; args } ->
           let new_lhs = option_map_preserve (self#visit_expr ~ctx) lhs in
           let new_func = self#visit_expr ~ctx func in
           let changed = ref false in
@@ -354,7 +361,7 @@ class ['a] map =
             map_mark_changed ~changed (self#visit_expr ~ctx) args
           in
           if new_lhs == lhs && new_func == func && not !changed then body
-          else FunctionCall { lhs = new_lhs; func = new_func; args = new_args }
+          else SFunctionCall { lhs = new_lhs; func = new_func; args = new_args }
       | Ifthenelse { guard; then_; else_ } ->
           let new_guard = self#visit_expr ~ctx guard in
           let new_then = self#visit_stmt ~ctx then_ in
@@ -394,11 +401,11 @@ class ['a] map =
           let new_value = self#visit_expr ~ctx value in
           if new_msg == msg && new_value == value then body
           else Output { msg = new_msg; value = new_value }
-      | Goto _ | Skip | Unhandled _ | Break -> body
+      | Goto _ | Skip | SUnhandled _ | Break -> body
 
     method visit_stmt ~(ctx : 'a) (stmt : Stmt.t) =
       let new_body = self#visit_stmt_body ~ctx stmt.body in
-      let new_location = self#visit_location ~ctx stmt.location in
-      if new_body == stmt.body && new_location == stmt.location then stmt
-      else { body = new_body; location = new_location }
+      let new_location = self#visit_location ~ctx stmt.stmt_location in
+      if new_body == stmt.body && new_location == stmt.stmt_location then stmt
+      else { body = new_body; stmt_location = new_location }
   end

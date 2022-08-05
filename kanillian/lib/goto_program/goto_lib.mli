@@ -143,7 +143,7 @@ and Type : sig
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end
 
-module Expr : sig
+module rec Expr : sig
   type value =
     | Array of t list
     | IntConstant of Z.t
@@ -153,11 +153,11 @@ module Expr : sig
     | DoubleConstant of float
     | FloatConstant of float
     | Symbol of string
-    | FunctionCall of { func : t; args : t list }
+    | EFunctionCall of { func : t; args : t list }
     | BinOp of { op : Ops.Binary.t; lhs : t; rhs : t }
     | ByteExtract of { e : t; offset : int }
     | Dereference of t
-    | Assign of { lhs : t; rhs : t }
+    | EAssign of { lhs : t; rhs : t }
     | UnOp of { op : Ops.Unary.t; e : t }
     | Struct of t list
     | Member of { lhs : t; field : string }
@@ -166,8 +166,9 @@ module Expr : sig
     | StringConstant of string
     | TypeCast of t
     | If of { cond : t; then_ : t; else_ : t }
+    | StatementExpression of Stmt.t list
     | Nondet
-    | Unhandled of Id.t * string
+    | EUnhandled of Id.t * string
 
   and t = { value : value; type_ : Type.t; location : Location.t }
   [@@deriving show]
@@ -178,16 +179,20 @@ module Expr : sig
   val of_irep : machine:Machine_model.t -> Irep.t -> t
 end
 
-module Stmt : sig
+and Stmt : sig
   type body =
     | Decl of { lhs : Expr.t; value : Expr.t option }
-    | Assign of { lhs : Expr.t; rhs : Expr.t }
+    | SAssign of { lhs : Expr.t; rhs : Expr.t }
     | Assume of { cond : Expr.t }
     | Assert of { cond : Expr.t; property_class : string option }
     | Block of t list
     | Label of string * t list
     | Goto of string
-    | FunctionCall of { lhs : Expr.t option; func : Expr.t; args : Expr.t list }
+    | SFunctionCall of {
+        lhs : Expr.t option;
+        func : Expr.t;
+        args : Expr.t list;
+      }
     | Switch of {
         control : Expr.t;
         cases : switch_case list;
@@ -199,10 +204,10 @@ module Stmt : sig
     | Expression of Expr.t
     | Output of { msg : Expr.t; value : Expr.t }
     | Return of Expr.t option
-    | Unhandled of Id.t
+    | SUnhandled of Id.t
 
   and switch_case = { case : Expr.t; sw_body : t }
-  and t = { location : Location.t; body : body }
+  and t = { stmt_location : Location.t; body : body }
 
   val pp : Format.formatter -> t -> unit
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body

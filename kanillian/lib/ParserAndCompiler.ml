@@ -15,7 +15,6 @@ type tl_ast = Program.t
 
 module TargetLangOptions = struct
   type t = {
-    main_only : bool;
     kstats_file : string option;
     harness : string option;
     hide_genv : bool;
@@ -24,13 +23,6 @@ module TargetLangOptions = struct
   let term =
     let open Cmdliner in
     let docs = Manpage.s_common_options in
-    let doc =
-      "Compile only the main function and its dependencies. It's a hack, use \
-       only for testing things."
-    in
-    let main_only =
-      Arg.(value & flag & info [ "only-main"; "main-only" ] ~docs ~doc)
-    in
     let doc =
       "If set, write out a file containing the statistics about the \
        compilation process. If the file already exists, it adds to stats to \
@@ -52,13 +44,12 @@ module TargetLangOptions = struct
     in
     let doc = "Hide the global environment from the logs" in
     let hide_genv = Arg.(value & flag & info [ "hide-genv" ] ~docs ~doc) in
-    let opt main_only kstats_file harness hide_genv =
-      { main_only; kstats_file; harness; hide_genv }
+    let opt kstats_file harness hide_genv =
+      { kstats_file; harness; hide_genv }
     in
-    Term.(const opt $ main_only $ kstats_file $ harness $ hide_genv)
+    Term.(const opt $ kstats_file $ harness $ hide_genv)
 
-  let apply { main_only; kstats_file; harness; hide_genv } =
-    Kconfig.main_only := main_only;
+  let apply { kstats_file; harness; hide_genv } =
     Kconfig.kstats_file := kstats_file;
     Kconfig.harness := harness;
     Kconfig.hide_genv := hide_genv
@@ -101,7 +92,6 @@ let parse_and_compile_files files =
     | _ -> failwith "Kanillian only handles one symtab file at the moment"
   in
   let+ goto_prog = parse_symtab_into_goto path in
-  if !Kconfig.main_only then Main_only.filter_funs goto_prog;
   let goto_prog = Sanitize.sanitize_program goto_prog in
   let context =
     Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog

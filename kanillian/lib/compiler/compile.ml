@@ -25,234 +25,6 @@ module Mem_interface = Memory_model.Interface
 open Helpers
 open Compile_expr
 
-let rec compile_statement ~ctx (stmt : Stmt.t) : Body_item.t list =
-  let compile_statement_c = compile_statement ~ctx in
-  let compile_expr_c = compile_expr ~ctx in
-  let loc = Body_item.compile_location stmt.location in
-  let id = stmt.location.origin_id in
-  let b = Body_item.make ~loc ~id in
-  let add_annot x = List.map b x in
-  let set_first_label_opt label stmts =
-    Helpers.set_first_label_opt ~annot:(b ~loop:[]) label stmts
-  in
-  let set_first_label label stmts = set_first_label_opt (Some label) stmts in
-  match stmt.body with
-  | Skip -> [ b Skip ]
-  | Block ss -> List.concat_map compile_statement_c ss
-  | Label (s, ss) -> List.concat_map compile_statement_c ss |> set_first_label s
-  | Goto lab -> [ b (Goto lab) ]
-  | Assume { cond } ->
-      let e, pre = compile_expr_c cond in
-      let e = Val_repr.as_value ~msg:"Assume operand" e in
-      (* FIXME: hack to avoid wrong compilation to be in the way.
-         Remove that later. *)
-      let e =
-        Expr.subst_expr_for_expr ~to_subst:(Expr.Lit Nono)
-          ~subst_with:(Expr.Lit (Bool true)) e
-      in
-      let f =
-        match Formula.lift_logic_expr e with
-        | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
-        | Some (f, _) -> f
-      in
-      pre @ [ b (Logic (Assume f)) ]
-  (* We can't output nothing, as a label might have to get attached *)
-  | Assert { property_class = Some "cover"; _ } -> [ b Skip ]
-  | Assert { cond; property_class = _ } ->
-      let e, pre = compile_expr_c cond in
-      let e = Val_repr.as_value ~msg:"Assert operand" e in
-      let e =
-        Expr.subst_expr_for_expr ~to_subst:(Expr.Lit Nono)
-          ~subst_with:(Expr.Lit (Bool false)) e
-      in
-      let f =
-        match Formula.lift_logic_expr e with
-        | None -> Error.code_error (Fmt.str "Unable to lift: %a" Expr.pp e)
-        | Some (f, _) -> f
-      in
-      pre @ [ b (Logic (Assert f)) ]
-  | Return e ->
-      let e, s =
-        match e with
-        | Some e -> (
-            let open Cs.Syntax in
-            let* e = compile_expr_c e in
-            match e with
-            | ByValue e -> Cs.return e
-            | ByCopy { ptr; type_ } ->
-                let dst =
-                  Expr.PVar Constants.Kanillian_names.return_by_copy_name
-                in
-                let copy_cmd = Memory.memcpy ~ctx ~type_ ~src:ptr ~dst in
-                Cs.return ~app:[ b copy_cmd ] (Expr.Lit Undefined)
-            | ByCompositValue { writes; _ } ->
-                let dst =
-                  Expr.PVar Constants.Kanillian_names.return_by_copy_name
-                in
-                let cmds = Memory.write_composit ~ctx ~annot:b ~dst writes in
-                Cs.return ~app:cmds (Expr.Lit Undefined)
-            | Procedure _ -> Error.code_error "Return value is a procedure")
-        | None -> Cs.return ~app:[] (Expr.Lit Undefined)
-      in
-      let variable = Utils.Names.return_variable in
-      s
-      @ add_annot
-          [ Assignment (variable, e); Goto Constants.Kanillian_names.ret_label ]
-  | Decl { lhs = glhs; value } ->
-      (* TODO:
-         I have too many if/elses for deciding how things should be done,
-         and that's all over the compiler. I should probably have a variant
-         and a unique decision procedure for that. *)
-      let ty = glhs.type_ in
-      let lhs = GExpr.as_symbol glhs in
-      (* ZSTs are just (GIL) Null values *)
-      if Ctx.is_zst_access ctx ty then
-        let cmd = Cmd.Assignment (lhs, Lit Null) in
-        [ b cmd ]
-      else if not (Ctx.representable_in_store ctx ty) then
-        let ptr, alloc_cmd = Memory.alloc_ptr ~ctx ty in
-        let assign = Cmd.Assignment (lhs, ptr) in
-        let write =
-          match value with
-          | None -> []
-          | Some gv -> (
-              let v, cmds = compile_expr_c gv in
-              match v with
-              | Val_repr.ByCompositValue { writes; _ } ->
-                  cmds @ Memory.write_composit ~ctx ~annot:b ~dst:ptr writes
-              | Val_repr.ByCopy { type_; ptr = src } ->
-                  cmds @ [ b (Memory.memcpy ~ctx ~type_ ~dst:ptr ~src) ]
-              | _ ->
-                  Error.code_error
-                    "Declaring composit value, not writing a composit")
-        in
-        [ b alloc_cmd; b assign ] @ write
-      else if Ctx.in_memory ctx lhs then
-        let ptr, action_cmd = Memory.alloc_ptr ~ctx ty in
-        let assign = Cmd.Assignment (lhs, ptr) in
-        let write =
-          match value with
-          | None -> []
-          | Some e ->
-              let v, pre = compile_expr_c e in
-              let v =
-                Val_repr.as_value ~error:Error.code_error
-                  ~msg:"declaration initial value for in-memory scalar access" v
-              in
-              let write = Memory.store_scalar ~ctx (Expr.PVar lhs) v ty in
-              pre @ [ b write ]
-        in
-        [ b action_cmd; b assign ] @ write
-      else
-        let v, s =
-          match value with
-          | Some e ->
-              let e, s = compile_expr_c e in
-              let e =
-                Val_repr.as_value ~error:Error.code_error
-                  ~msg:"in memory scalar" e
-              in
-              (e, s)
-          | None -> (Lit Undefined, [])
-        in
-        s @ [ b (Assignment (lhs, v)) ]
-  | Assign { lhs; rhs } ->
-      let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
-      body
-  | Expression e ->
-      let _, s = compile_expr_c e in
-      s
-  | FunctionCall { lhs; func; args } -> (
-      let v, pre1 = compile_call ~ctx ~add_annot:b func args in
-      match lhs with
-      | None -> pre1
-      | Some lvalue ->
-          let access, pre2 = lvalue_as_access ~ctx ~read:false lvalue in
-          let write =
-            match (access, v) with
-            | ZST, _ -> []
-            | Direct x, ByValue v -> [ b (Cmd.Assignment (x, v)) ]
-            | InMemoryScalar { ptr; _ }, ByValue v ->
-                [ b (Memory.store_scalar ~ctx ptr v lvalue.type_) ]
-            | InMemoryComposit { ptr = dst; type_ }, ByCopy { ptr = src; _ } ->
-                [ b (Memory.memcpy ~ctx ~type_ ~src ~dst) ]
-            | _ ->
-                Error.code_error
-                  (Fmt.str
-                     "Wrong mix of access and value kind for function call:\n\
-                      %a = %a" pp_access access Val_repr.pp v)
-          in
-          pre1 @ pre2 @ write)
-  | Switch { control; cases; default } ->
-      let end_lab = Ctx.fresh_lab ctx in
-      let next_lab = ref None in
-      let control_ty = control.type_ in
-      let control, control_s = compile_expr_c control in
-      let rec compile_cases ~ctx ?(acc = []) = function
-        | [] -> acc
-        | case :: rest ->
-            let cur_lab = !next_lab in
-            let nlab = Ctx.fresh_lab ctx in
-            next_lab := Some nlab;
-            let guard = case.Stmt.case in
-            let guard_e, guard_s = compile_expr ~ctx guard in
-            let equal_v, comparison_calls =
-              compile_binop ~ctx ~lty:control_ty ~rty:guard.type_ Equal control
-                guard_e
-            in
-            let comparison_calls =
-              List.map
-                (Body_item.make_hloc ~loc:guard.location)
-                comparison_calls
-            in
-            let block = compile_statement ~ctx case.sw_body in
-            let block_lab, block = Body_item.get_or_set_fresh_lab ~ctx block in
-            let goto_block = Cmd.GuardedGoto (equal_v, block_lab, nlab) in
-            let total_block =
-              set_first_label_opt cur_lab
-                (guard_s @ comparison_calls @ [ b goto_block ] @ block)
-            in
-            let acc = acc @ total_block in
-            compile_cases ~ctx ~acc rest
-      in
-      let compiled_cases =
-        Ctx.with_break ctx end_lab (fun ctx -> compile_cases ~ctx cases)
-      in
-      let default_block =
-        match default with
-        | None -> [ b ?label:!next_lab Skip ]
-        | Some default ->
-            Ctx.with_break ctx end_lab (fun ctx ->
-                set_first_label_opt !next_lab (compile_statement ~ctx default))
-      in
-      let end_ = [ b ~label:end_lab Skip ] in
-      control_s @ compiled_cases @ default_block @ end_
-  | Ifthenelse { guard; then_; else_ } ->
-      let comp_guard, cmd_guard = compile_expr_c guard in
-      let comp_guard = Val_repr.as_value ~msg:"ifthenelse guard" comp_guard in
-      let comp_then_ = compile_statement_c then_ in
-      let comp_else = Option.map compile_statement_c else_ in
-      let end_lab = Ctx.fresh_lab ctx in
-      let then_lab, comp_then_ =
-        Body_item.get_or_set_fresh_lab ~ctx comp_then_
-      in
-      let else_lab, comp_else =
-        match comp_else with
-        | None -> (end_lab, [])
-        | Some else_ -> Body_item.get_or_set_fresh_lab ~ctx else_
-      in
-      let goto_guard = b (Cmd.GuardedGoto (comp_guard, then_lab, else_lab)) in
-      let end_ = [ b ~label:end_lab Skip ] in
-      cmd_guard @ [ goto_guard ] @ comp_then_ @ comp_else @ end_
-  | Break -> (
-      match ctx.break_lab with
-      | None -> Error.unexpected "Break call outside of loop of switch"
-      | Some break_lab -> [ b (Cmd.Goto break_lab) ])
-  | Unhandled id -> [ b (assert_unhandled ~feature:(StmtIrep id) []) ]
-  | Output _ ->
-      let () = Stats.Unhandled.signal OutputStmt in
-      [ b Skip ]
-
 let set_global_function (fn : Program.Func.t) : Body_item.t Seq.t =
   let b =
     let loc = Body_item.compile_location fn.location in
@@ -408,7 +180,7 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
               value = Nondet;
             }
         in
-        Stmt.{ location = func.location; body = Return (Some nondet) }
+        Stmt.{ stmt_location = func.location; body = Return (Some nondet) }
   in
 
   (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
@@ -435,11 +207,9 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
       (free_locals @ [ b ReturnNormal ])
   in
   let alloc_params = compile_alloc_params ~ctx proc_params |> List.map b in
+  let _, comp_body = compile_statement ~ctx body in
   let proc_body =
-    Array.of_list
-      (alloc_params
-      @ compile_statement ~ctx body
-      @ [ return_undef ] @ return_block)
+    Array.of_list (alloc_params @ comp_body @ [ return_undef ] @ return_block)
   in
   let proc_params =
     let identifiers = List.map fst proc_params in
@@ -460,7 +230,7 @@ let start_for_harness ~ctx (harness : Program.Func.t) =
   let cprover_start =
     let open Program.Func in
     let stmt stmt_body =
-      Stmt.{ location = harness.location; body = stmt_body }
+      Stmt.{ stmt_location = harness.location; body = stmt_body }
     in
     let expr type_ expr_value =
       GExpr.{ location = harness.location; type_; value = expr_value }
@@ -494,7 +264,7 @@ let start_for_harness ~ctx (harness : Program.Func.t) =
                ([
                   (* First call __CPROVER__initialize*)
                   stmt
-                  @@ FunctionCall
+                  @@ SFunctionCall
                        {
                          lhs = None;
                          func =
@@ -506,7 +276,7 @@ let start_for_harness ~ctx (harness : Program.Func.t) =
                @ params_decls
                @ [
                    stmt
-                   @@ FunctionCall
+                   @@ SFunctionCall
                         {
                           lhs = None;
                           func = expr harness_type (Symbol harness.symbol);
