@@ -126,7 +126,7 @@ module Node = struct
 
   type mem_val =
     | Zeros
-    | Undef of qty
+    | Poisoned of qty
     | Single of { chunk : Chunk.t; value : SVal.t }
     | Array of { chunk : Chunk.t; values : SVArr.t }
   [@@deriving yojson]
@@ -134,8 +134,8 @@ module Node = struct
   let eq_mem_val ma mb =
     match (ma, mb) with
     | Zeros, Zeros
-    | Undef Totally, Undef Totally
-    | Undef Partially, Undef Partially -> true
+    | Poisoned Totally, Poisoned Totally
+    | Poisoned Partially, Poisoned Partially -> true
     | ( Single { chunk = chunka; value = valuea },
         Single { chunk = chunkb; value = valueb } )
       when Chunk.equal chunka chunkb && SVal.equal valuea valueb -> true
@@ -176,7 +176,7 @@ module Node = struct
         MemVal { mem_val; exact_perm; min_perm }
     | _ -> t
 
-  let undefined ~perm = make_owned ~perm ~mem_val:(Undef Totally)
+  let poisoned ~perm = make_owned ~perm ~mem_val:(Poisoned Totally)
   let not_owned = NotOwned Totally
 
   let pp fmt = function
@@ -184,9 +184,9 @@ module Node = struct
     | MemVal { exact_perm; mem_val; _ } -> (
         match mem_val with
         | Zeros -> Fmt.pf fmt "ZEROS (%a)" (Fmt.Dump.option Perm.pp) exact_perm
-        | Undef qty ->
-            Fmt.pf fmt "%s UNDEF (%a)" (str_qty qty) (Fmt.Dump.option Perm.pp)
-              exact_perm
+        | Poisoned qty ->
+            Fmt.pf fmt "%s POISONED (%a)" (str_qty qty)
+              (Fmt.Dump.option Perm.pp) exact_perm
         | Single { chunk; value } ->
             Fmt.pf fmt "(%a : %s) (%a)" SVal.pp value (Chunk.to_string chunk)
               (Fmt.Dump.option Perm.pp) exact_perm
@@ -220,7 +220,7 @@ module Node = struct
          min_perma == min_permb && ex_perma == ex_permb
          &&
          match (vala, valb) with
-         | Undef x, Undef y -> x == y
+         | Poisoned x, Poisoned y -> x == y
          | Single { chunk = ca; value = va }, Single { chunk = cb; value = vb }
            -> Chunk.equal ca cb && SVal.equal va vb
          | _ -> false )
@@ -239,8 +239,8 @@ module Node = struct
         let make_pair left right = Delayed.return (mk left, mk right) in
         match mem_val with
         | Zeros -> make_pair Zeros Zeros
-        | Undef Totally -> make_pair (Undef Totally) (Undef Totally)
-        | Single _ -> make_pair (Undef Totally) (Undef Totally)
+        | Poisoned Totally -> make_pair (Poisoned Totally) (Poisoned Totally)
+        | Single _ -> make_pair (Poisoned Totally) (Poisoned Totally)
         | Array { chunk; values } ->
             let open Expr.Infix in
             let mk_arr ~chunk values =
@@ -257,7 +257,7 @@ module Node = struct
             let* left = mk_arr ~chunk left_arr in
             let+ right = mk_arr ~chunk right_arr in
             (left, right)
-        | Undef Partially ->
+        | Poisoned Partially ->
             failwith "Should never split a partially undef node")
 
   let merge ~left ~right =
@@ -280,25 +280,25 @@ module Node = struct
         let mk mem_val = MemVal { min_perm; mem_val; exact_perm } in
         match (vala, valb) with
         | Zeros, Zeros -> ret (mk Zeros)
-        | Undef Totally, Undef Totally -> ret (mk (Undef Totally))
+        | Poisoned Totally, Poisoned Totally -> ret (mk (Poisoned Totally))
         | ( Single { chunk = chunk_l; value = value_l },
             Single { chunk = chunk_r; value = value_r } )
           when Chunk.equal chunk_l chunk_r -> (
             match value_l ^: SVArr.singleton value_r with
             | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Undef Partially)))
+            | None -> ret (mk (Poisoned Partially)))
         | ( Single { chunk = chunk_l; value = value_l },
             Array { chunk = chunk_r; values = values_r } )
           when Chunk.equal chunk_l chunk_r -> (
             match value_l ^: values_r with
             | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Undef Partially)))
+            | None -> ret (mk (Poisoned Partially)))
         | ( Array { chunk = chunk_l; values = values_l },
             Single { chunk = chunk_r; value = value_r } )
           when Chunk.equal chunk_l chunk_r -> (
             match values_l @: SVArr.singleton value_r with
             | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Undef Partially)))
+            | None -> ret (mk (Poisoned Partially)))
         | ( Array { chunk = chunk_l; values = values_l },
             Array { chunk = chunk_r; values = values_r } )
           when Chunk.equal chunk_l chunk_r ->
@@ -310,7 +310,7 @@ module Node = struct
             Delayed.map
               (SVArr.concat_knowing_size (values_l, size_l) (values_r, size_r))
               (fun values -> mk (Array { chunk = chunk_l; values }))
-        | Array { chunk; values }, Undef _ ->
+        | Array { chunk; values }, Poisoned _ ->
             let size_l, size_r =
               let open Expr.Infix in
               let size_chunk = Expr.int (Chunk.size chunk) in
@@ -328,7 +328,7 @@ module Node = struct
             Delayed.map
               (SVArr.concat_knowing_size (values, size_l) (AllZeros, size_r))
               (fun values -> mk (Array { chunk; values }))
-        | Undef _, Array { chunk; values } ->
+        | Poisoned _, Array { chunk; values } ->
             let size_l, size_r =
               let open Expr.Infix in
               let size_chunk = Expr.int (Chunk.size chunk) in
@@ -346,7 +346,7 @@ module Node = struct
             Delayed.map
               (SVArr.concat_knowing_size (AllZeros, size_r) (values, size_l))
               (fun values -> mk (Array { chunk; values }))
-        | _, _ -> ret (mk (Undef Partially)))
+        | _, _ -> ret (mk (Poisoned Partially)))
 
   let decode_bytes_to_unsigned_int ~chunk arr size =
     let open Delayed.Syntax in
@@ -389,7 +389,7 @@ module Node = struct
     | NotOwned _ -> DR.error MissingResource
     | MemVal { mem_val = Zeros; exact_perm; _ } ->
         DR.ok (SVal.zero_of_chunk chunk, exact_perm)
-    | MemVal { mem_val = Undef _; exact_perm; _ } -> DR.error LoadingPoison
+    | MemVal { mem_val = Poisoned _; exact_perm; _ } -> DR.error LoadingPoison
     | MemVal { mem_val = Single { chunk = m_chunk; value }; exact_perm; _ } ->
         if Chunk.equal m_chunk chunk then DR.ok (value, exact_perm)
         else
@@ -465,7 +465,7 @@ module Node = struct
     | NotOwned _ -> DR.error MissingResource
     | MemVal { mem_val = Zeros; exact_perm; _ } ->
         DR.ok (SVArr.AllZeros, exact_perm)
-    | MemVal { mem_val = Undef _; exact_perm; _ } ->
+    | MemVal { mem_val = Poisoned _; exact_perm; _ } ->
         DR.ok (SVArr.AllUndef, exact_perm)
     | MemVal { mem_val = Single { chunk = m_chunk; value }; exact_perm; _ } ->
         DR.ok
@@ -610,7 +610,7 @@ module Tree = struct
     let children =
       match node with
       | NotOwned Totally
-      | MemVal { exact_perm = Some _; mem_val = Zeros | Undef Totally; _ } ->
+      | MemVal { exact_perm = Some _; mem_val = Zeros | Poisoned Totally; _ } ->
           None
       | _ -> Some (left, right)
     in
@@ -637,8 +637,8 @@ module Tree = struct
     let span = Range.of_low_chunk_and_size low chunk size in
     make ~node ~span ()
 
-  let undefined ?(perm = Perm.Freeable) span =
-    make ~node:(Node.undefined ~perm) ~span ()
+  let poisoned ?(perm = Perm.Freeable) span =
+    make ~node:(Node.poisoned ~perm) ~span ()
 
   let zeros ?(perm = Perm.Freeable) span =
     make ~node:(Node.make_owned ~mem_val:Zeros ~perm) ~span ()
@@ -994,7 +994,7 @@ module Tree = struct
       match node.node with
       | NotOwned _ -> DR.error MissingResource
       | MemVal { min_perm; _ } ->
-          if min_perm >=% Writable then DR.ok (undefined ~perm:min_perm range)
+          if min_perm >=% Writable then DR.ok (poisoned ~perm:min_perm range)
           else
             DR.error
               (InsufficientPermission { required = Writable; actual = min_perm })
@@ -1078,10 +1078,10 @@ module Tree = struct
     let low, high = span in
     match node with
     | NotOwned Totally -> []
-    | NotOwned Partially | MemVal { mem_val = Undef Partially; _ } ->
+    | NotOwned Partially | MemVal { mem_val = Poisoned Partially; _ } ->
         let left, right = Option.get children in
         assertions ~loc left @ assertions ~loc right
-    | MemVal { mem_val = Undef Totally; exact_perm = perm; _ } ->
+    | MemVal { mem_val = Poisoned Totally; exact_perm = perm; _ } ->
         [ CoreP.hole ~loc ~low ~high ~perm ]
     | MemVal { mem_val = Zeros; exact_perm = perm; _ } ->
         [ CoreP.zeros ~loc ~low ~high ~perm ]
@@ -1124,7 +1124,7 @@ module Tree = struct
   let box t =
     let rec flatten_tree { node; span; children; _ } =
       match node with
-      | NotOwned Partially | MemVal { mem_val = Undef Partially; _ } ->
+      | NotOwned Partially | MemVal { mem_val = Poisoned Partially; _ } ->
           let left, right = Option.get children in
           flatten_tree left @ flatten_tree right
       | node -> [ (span, node) ]
@@ -1253,7 +1253,7 @@ let with_root t root = with_root_opt t (Some root)
 
 let alloc low high =
   let bounds = Range.make low high in
-  Tree { root = Some (Tree.undefined bounds); bounds = Some bounds }
+  Tree { root = Some (Tree.poisoned bounds); bounds = Some bounds }
 
 let drop_perm t low high new_perm =
   let open DR.Syntax in
@@ -1392,8 +1392,8 @@ let set_simple_mem_val ~mem_val t low high perm =
   in
   DR.of_result ~learned (with_root t root_set)
 
-let get_hole = get_simple_mem_val ~expected_mem_val:(Undef Totally)
-let set_hole = set_simple_mem_val ~mem_val:(Undef Totally)
+let get_hole = get_simple_mem_val ~expected_mem_val:(Poisoned Totally)
+let set_hole = set_simple_mem_val ~mem_val:(Poisoned Totally)
 let get_zeros = get_simple_mem_val ~expected_mem_val:Zeros
 let set_zeros = set_simple_mem_val ~mem_val:Zeros
 
