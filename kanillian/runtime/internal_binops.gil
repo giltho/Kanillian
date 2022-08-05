@@ -4,6 +4,9 @@ proc i__binop_add_maybe_ptr(v1, v2) {
         goto [ (typeOf v1) = Int ] llon loth;
   llon: goto [ (typeOf v2) = Int ] blon llro;
   blon: ret := v1 i+ v2;
+        (* Check for overflow *)
+        bounds := "i__archi_usize_bounds"();
+        assert ((l-nth(bounds, 0i) <=# ret) /\ (ret <=# l-nth(bounds, 1i)));
         return;
   llro: goto [ typeOf(l-nth(v2, 0i)) = Obj ] llrp unde;
   llrp: ret := {{ l-nth(v2, 0i), v1 i+ l-nth(v2, 1i) }};
@@ -20,6 +23,9 @@ proc i__binop_sub_maybe_ptr(v1, v2) {
         goto [ (typeOf v1) = Int ] llon loth;
   llon: goto [ (typeOf v2) = Int ] blon llro;
   blon: ret := v1 i- v2;
+        (* Check for overflow *)
+        bounds := "i__archi_usize_bounds"();
+        assert ((l-nth(bounds, 0i) <=# ret) /\ (ret <=# l-nth(bounds, 1i)));
         return;
   llro: goto [ typeOf(l-nth(v2, 0i)) = Obj ] llrp unde;
   llrp: ret := {{ l-nth(v2, 0i), v1 i- l-nth(v2, 1i) }};
