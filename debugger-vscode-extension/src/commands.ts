@@ -4,7 +4,7 @@ export async function startDebugging(
   config: DebugConfiguration,
   noDebug = false
 ) {
-  const validInputs = new Set(['wisl', 'js', 'c']);
+  const validInputs = new Set(['wisl', 'js', 'c', 'kani']);
   const validateInput = (input: string) => {
     if (!validInputs.has(input)) {
       return 'The target language must be one of: wisl, js, c';
