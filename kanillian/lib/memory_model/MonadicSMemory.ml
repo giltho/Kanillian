@@ -42,9 +42,12 @@ type err_t =
       sheaptree_err : SHeapTree.err;
     }
   | GEnvErr of GEnv.err_t
+  | Not_a_C_value of Expr.t
 
-let lift_sheaptree_err loc err =
-  SHeapTreeErr { at_locations = [ loc ]; sheaptree_err = err }
+let lift_sheaptree_err loc (err : SHeapTree.err) =
+  match err with
+  | Not_a_C_value e -> Not_a_C_value e
+  | _ -> SHeapTreeErr { at_locations = [ loc ]; sheaptree_err = err }
 
 let lift_genv_res r = Result.map_error (fun e -> GEnvErr e) r
 
@@ -510,6 +513,14 @@ type action_ret = Success of (t * vt list) | Failure of err_t
 
 let make_branch ~heap ?(rets = []) () = (ref heap, rets)
 
+let sval_of_chunk_and_expr chunk expr =
+  let open Delayed.Syntax in
+  let+ sval = SVal.of_chunk_and_expr chunk expr in
+  Result.map_error
+    (function
+      | SVal.Not_a_C_value e -> Not_a_C_value e)
+    sval
+
 (* Init *)
 
 let init () = ref { genv = GEnv.empty; mem = Mem.empty }
@@ -578,7 +589,7 @@ let execute_store heap params =
   match params with
   | [ Expr.Lit (String chunk_name); loc; ofs; value ] ->
       let chunk = Chunk.of_string chunk_name in
-      let* sval = SVal.of_chunk_and_expr chunk value in
+      let** sval = sval_of_chunk_and_expr chunk value in
       let++ mem = Mem.store heap.mem loc chunk ofs sval in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "store" params
@@ -659,7 +670,7 @@ let execute_set_single heap params =
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let* sval = SVal.of_chunk_and_expr chunk sval_e in
+      let** sval = sval_of_chunk_and_expr chunk sval_e in
       let++ mem = Mem.set_single heap.mem loc ofs chunk sval perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params
@@ -903,6 +914,7 @@ let pp_err fmt (e : err_t) =
           | l -> Fmt.pf fmt "s %a" (Fmt.Dump.list Fmt.string) l)
         at_locations SHeapTree.pp_err sheaptree_err
   | GEnvErr (Symbol_not_found s) -> Fmt.pf fmt "Symbol not found: %s" s
+  | Not_a_C_value v -> Fmt.pf fmt "Not a C value: %a" Expr.pp v
 
 (* let str_of_err e = Format.asprintf "%a" pp_err e *)
 
@@ -1084,6 +1096,7 @@ let get_recovery_vals _ = function
   | SHeapTreeErr { at_locations; _ } ->
       List.map Expr.loc_from_loc_name at_locations
   | GEnvErr (Symbol_not_found s) -> [ Expr.string s ]
+  | Not_a_C_value e -> [ e ]
 
 let get_failing_constraint _e = failwith "Not ready for bi-abduction yet"
 

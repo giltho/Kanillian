@@ -4,6 +4,8 @@ open Delayed.Syntax
 module DO = Delayed_option
 module DR = Delayed_result
 
+type err = Not_a_C_value of Expr.t
+
 (* A symbolic value in memory is just an expr, but
    we maintain an abstraction around it to make sure
    we properly do sanity checks at the boundaries *)
@@ -68,23 +70,19 @@ end
 
 (* Raise this exception when the right types
    haven't been correctly assumed. *)
-exception Not_a_C_value of Expr.t
-
-let () =
-  Printexc.register_printer (function
-    | Not_a_C_value e ->
-        Some
-          (Format.asprintf "Storing this value, it's not a C value: %a" Expr.pp
-             e)
-    | _ -> None)
 
 let of_chunk_and_expr (chunk : Chunk.t) sval_e =
   let open Patterns in
+  let open DR.Syntax in
   let return = Delayed.return in
   let* sval_e = Delayed.reduce sval_e in
-  let exn = Not_a_C_value sval_e in
-  let assert_type ty = Delayed.assert_type sval_e ty exn in
-  let error () = raise exn in
+
+  let error = Error (Not_a_C_value sval_e) in
+
+  let assert_type ty =
+    let+ has_type = Delayed.has_type sval_e ty in
+    if has_type then Ok () else error
+  in
   let in_bounds e =
     match Chunk.bounds chunk with
     | Some (low, high) ->
@@ -96,7 +94,7 @@ let of_chunk_and_expr (chunk : Chunk.t) sval_e =
   | U64, Arch64 | U32, Arch32 ->
       (* It has to be either an integer or a pointer *)
       if%ent integer sval_e then
-        if%ent in_bounds sval_e then return sval_e else error ()
+        if%ent in_bounds sval_e then DR.ok sval_e else return error
       else
         if%ent obj sval_e then
           let loc_expr = Expr.list_nth sval_e 0 in
@@ -114,17 +112,16 @@ let of_chunk_and_expr (chunk : Chunk.t) sval_e =
                 in
                 (aloc, learned)
           in
-          return ~learned (Expr.EList [ loc; ofs ])
-        else raise (Not_a_C_value sval_e)
+          DR.ok ~learned (Expr.EList [ loc; ofs ])
+        else return error
   | (U8 | I8 | U16 | I16 | I32 | U32 | I64 | U64 | I128 | U128), _ ->
-      let* () = assert_type IntType in
-      let+ () = Delayed.assert_ (in_bounds sval_e) exn in
-      sval_e
+      let** () = assert_type IntType in
+      if%ent in_bounds sval_e then DR.ok sval_e else return error
   | F64, _ ->
-      let+ () = assert_type NumberType in
+      let++ () = assert_type NumberType in
       sval_e
   | F32, _ ->
-      let+ () = assert_type NumberType in
+      let++ () = assert_type NumberType in
       sval_e
 
 let sure_is_zero = function
@@ -268,14 +265,16 @@ module SVArray = struct
     | _ -> None
 
   (** This already assumes the value is a number and not a pointer *)
-  let to_single_value ~chunk = function
+  let to_single_value ~chunk =
+    let open Delayed_result.Syntax in
+    function
     | Arr (EList [ a ]) ->
         (* What's inside is technically already an sval,
            be we don't check sometimes so we might as well here.. *)
-        let+ v = of_chunk_and_expr chunk a in
+        let++ v = of_chunk_and_expr chunk a in
         Some v
-    | AllZeros -> DO.some (zero_of_chunk chunk)
-    | _ -> DO.none ()
+    | AllZeros -> DR.ok (Some (zero_of_chunk chunk))
+    | _ -> DR.ok None
 
   let singleton e = Arr (Expr.EList [ e ])
 

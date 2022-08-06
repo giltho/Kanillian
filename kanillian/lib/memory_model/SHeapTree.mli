@@ -13,6 +13,7 @@ type err =
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison
+  | Not_a_C_value of Gil_syntax.Expr.t
 
 val pp_err : err Fmt.t
 val err_equal : err -> err -> bool

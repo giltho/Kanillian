@@ -689,15 +689,21 @@ and compile_call ~ctx ~add_annot:b (func : GExpr.t) (args : GExpr.t list) =
         in
         by_copy ~app:[ b gil_call ] temp_arg return_type
 
-and compile_assign ~ctx ~annot ~lhs ~rhs =
-  let () =
-    match lhs with
-    | GExpr.{ value = Symbol "m___RNvCs9jmnlWkFcUy_7result33foo__1__var_0"; _ }
-      ->
-        Fmt.pr "Compiling that assignment: %a : %a := %a : %a\n\n@?" GExpr.pp
-          lhs GType.pp lhs.type_ GExpr.pp rhs GType.pp rhs.type_
-    | _ -> ()
+and poison ~ctx ~annot (lhs : GExpr.t) =
+  let type_ = lhs.type_ in
+  let access, pre = lvalue_as_access ~ctx ~read:false lhs in
+  let write =
+    match access with
+    | ZST -> Cmd.Skip
+    | Direct x -> Assignment (x, Lit Undefined)
+    | InMemoryScalar { ptr; _ } | InMemoryComposit { ptr; _ } ->
+        Memory.poison ~ctx ~dst:ptr (Ctx.size_of ctx type_)
+    | InMemoryFunction _ | DirectFunction _ ->
+        Error.unexpected "poisoning a function"
   in
+  pre @ [ annot write ]
+
+and compile_assign ~ctx ~annot ~lhs ~rhs =
   let v, pre1 = compile_expr ~ctx rhs in
   let access, pre2 = lvalue_as_access ~ctx ~read:false lhs in
   let write =
@@ -1084,7 +1090,15 @@ and compile_statement ~ctx (stmt : Stmt.t) : Val_repr.t Cs.with_body =
         in
         s @ [ b (Assignment (lhs, v)) ] |> void
   | SAssign { lhs; rhs } ->
-      let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
+      (* Special case: my patched Kani will comment "deinit" if this assignment
+         correspond to a deinit that CBMC doesn't handle. *)
+      let body =
+        match stmt.stmt_location.comment with
+        | Some "deinit" -> poison ~ctx ~annot:b lhs
+        | _ ->
+            let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
+            body
+      in
       body |> void
   | Expression e -> compile_expr_c e
   | SFunctionCall { lhs; func; args } -> (

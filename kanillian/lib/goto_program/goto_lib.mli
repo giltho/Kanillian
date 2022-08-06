@@ -74,6 +74,7 @@ module Location : sig
     source : string option;
     line : int option;
     col : int option;
+    comment : string option;
   }
 
   val of_irep : Irep.t -> t

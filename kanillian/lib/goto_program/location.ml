@@ -7,6 +7,7 @@ type t = {
   source : string option;
   line : int option;
   col : int option;
+  comment : string option;
 }
 [@@deriving show { with_path = false }]
 
@@ -14,7 +15,8 @@ type t = {
    That would entail more granularity, but that would also mean modifying the whole AST and that's
    not a priority right now. *)
 
-let make ?source ?line ?col origin_id = { source; line; col; origin_id }
+let make ?source ?line ?col ?comment origin_id =
+  { source; line; col; origin_id; comment }
 
 let of_irep (irep : Irep.t) : t =
   let open Irep.Infix in
@@ -27,7 +29,8 @@ let of_irep (irep : Irep.t) : t =
           let source = Irep.as_just_string file_rep in
           let line = Option.map Irep.as_just_int (irep $? Line) in
           let col = Option.map Irep.as_just_int (irep $? Column) in
-          make ~source ?line ?col irep.unique_id)
+          let comment = Option.map Irep.as_just_string (irep $? Comment) in
+          make ~source ?line ?col ?comment irep.unique_id)
   | _ -> Gerror.unexpected ~irep "wrong Irep location"
 
 let sloc_in_irep irep =

@@ -1,6 +1,7 @@
 open Monadic
 open Gil_syntax
 
+type err = Not_a_C_value of Expr.t
 type t [@@deriving yojson]
 
 val alocs : t -> Utils.Containers.SS.t
@@ -10,7 +11,7 @@ val pp : Format.formatter -> t -> unit
 val substitution : le_subst:(Expr.t -> Expr.t) -> t -> t
 val zero_of_chunk : Chunk.t -> t
 val any_of_chunk : Chunk.t -> t Delayed.t
-val of_chunk_and_expr : Chunk.t -> Expr.t -> t Delayed.t
+val of_chunk_and_expr : Chunk.t -> Expr.t -> (t, err) Delayed_result.t
 val sure_is_zero : t -> bool
 val to_gil_expr : t -> Expr.t
 
@@ -26,7 +27,10 @@ module SVArray : sig
   val equal : t -> t -> bool
   val concat_knowing_size : t * Expr.t -> t * Expr.t -> t Delayed.t
   val concat : t -> t -> t option
-  val to_single_value : chunk:Chunk.t -> t -> sval option Delayed.t
+
+  val to_single_value :
+    chunk:Chunk.t -> t -> (sval option, err) Delayed_result.t
+
   val singleton : sval -> t
   val array_sub : t -> Expr.t -> Expr.t -> t
   val array_cons : sval -> t -> t option

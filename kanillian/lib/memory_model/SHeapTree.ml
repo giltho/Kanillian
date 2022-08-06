@@ -19,6 +19,15 @@ type err =
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison
+  | Not_a_C_value of Expr.t
+
+let sval_of_chunk_and_expr chunk expr =
+  let open Delayed.Syntax in
+  let+ sval = SVal.of_chunk_and_expr chunk expr in
+  Result.map_error
+    (function
+      | SVal.Not_a_C_value e -> Not_a_C_value e)
+    sval
 
 exception FatalErr of err
 
@@ -37,6 +46,7 @@ let pp_err fmt = function
   | WrongMemVal -> Fmt.pf fmt "WrongMemVal"
   | MemoryNotFreed -> Fmt.pf fmt "MemoryNotFreed"
   | LoadingPoison -> Fmt.pf fmt "LoadingPoison"
+  | Not_a_C_value e -> Fmt.pf fmt "Not_a_C_value"
 
 let err_equal a b =
   match (a, b) with
@@ -246,8 +256,11 @@ module Node = struct
             let mk_arr ~chunk values =
               let+ value = SVArr.to_single_value ~chunk values in
               match value with
-              | Some value -> mk (Single { chunk; value })
-              | None -> mk (Array { chunk; values })
+              | Ok (Some value) -> mk (Single { chunk; value })
+              | Ok None -> mk (Array { chunk; values })
+              | Error (Not_a_C_value e) ->
+                  (* Fixme: propagate the error properly *)
+                  Fmt.failwith "Not a C value: %a" Expr.pp e
             in
             let sz = Expr.int (Chunk.size chunk) in
             let len_left = (at - low) / sz in
@@ -350,6 +363,7 @@ module Node = struct
 
   let decode_bytes_to_unsigned_int ~chunk arr size =
     let open Delayed.Syntax in
+    let open DR.Syntax in
     let* values = SVArr.reduce arr in
     match values with
     | AllZeros -> DR.ok (SVal.zero_of_chunk chunk)
@@ -375,7 +389,7 @@ module Node = struct
                     Some byte #>= (Expr.int 0) #&& (byte #<= (Expr.int 255)))
               bytes
           in
-          let* v = SVal.of_chunk_and_expr chunk v in
+          let** v = sval_of_chunk_and_expr chunk v in
           DR.ok ~learned v
         else
           let+ ret = SVal.any_of_chunk chunk in
@@ -413,8 +427,8 @@ module Node = struct
         match values with
         | AllZeros -> DR.ok (SVal.zero_of_chunk chunk, exact_perm)
         | Arr (EList [ a ]) ->
-            let* sval = SVal.of_chunk_and_expr chunk a in
-            DR.ok (sval, exact_perm)
+            let++ sval = sval_of_chunk_and_expr chunk a in
+            (sval, exact_perm)
         | AllUndef -> DR.error LoadingPoison
         | Arr l ->
             let* () =
@@ -423,8 +437,8 @@ module Node = struct
                 (Expr.list_length l) #== (Expr.int 1)
                 (Failure "Not an array")
             in
-            let* sval = SVal.of_chunk_and_expr chunk (Expr.list_nth l 0) in
-            DR.ok (sval, exact_perm))
+            let++ sval = sval_of_chunk_and_expr chunk (Expr.list_nth l 0) in
+            (sval, exact_perm))
     | MemVal { mem_val = Array { chunk = _; _ }; exact_perm; _ } ->
         let+ ret = SVal.any_of_chunk chunk in
         Ok (ret, exact_perm)
