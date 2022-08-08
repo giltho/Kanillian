@@ -26,6 +26,7 @@ let dummy_access ~ctx type_ =
 type binop_comp =
   | GilBinop of BinOp.t
   | Proc of string
+  | App of (Expr.t -> Expr.t -> Expr.t)
   | Then of (binop_comp * (Expr.t -> Expr.t Cs.with_cmds))
   | Unhandled of [ `With_type | `Without_type ]
 
@@ -122,11 +123,13 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Plus -> (
         match (lty, rty) with
-        | (CInteger I_size_t | Pointer _), (CInteger I_size_t | Pointer _) ->
+        | Pointer ty, CInteger (I_size_t | I_ssize_t) ->
+            App (Memory.ptr_offset ~ctx ~ty)
+        | CInteger (I_size_t | I_ssize_t), Pointer ty ->
+            App (fun x y -> Memory.ptr_offset ~ctx ~ty y x)
+        | CInteger (I_size_t | I_ssize_t), CInteger (I_size_t | I_ssize_t) ->
             Proc add_maybe_ptr
-        | CInteger I_int, CInteger I_int
-        | CInteger I_char, CInteger I_char
-        | CInteger I_ssize_t, CInteger I_ssize_t ->
+        | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
             GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
           when widtha == widthb ->
@@ -166,8 +169,20 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Or -> GilBinop BinOp.BOr
     | And -> GilBinop BinOp.BAnd
-    | OverflowPlus ->
-        GilBinop IPlus ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
+    | OverflowPlus -> (
+        let int_check =
+          GilBinop IPlus ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
+        in
+        match (lty, rty) with
+        | CInteger (I_size_t | I_ssize_t), CInteger (I_size_t | I_ssize_t) ->
+            Proc overflow_plus_maybe_ptr
+        | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
+            int_check
+        | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
+          when widtha == widthb -> int_check
+        | Signedbv { width = widtha }, Signedbv { width = widthb }
+          when widtha == widthb -> int_check
+        | _ -> Unhandled `With_type)
     | OverflowMult ->
         GilBinop ITimes ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
     | OverflowMinus ->
@@ -185,6 +200,7 @@ let compile_binop
         in
         Cs.return ~app:[ call ] (Expr.PVar gvar)
     | GilBinop b -> Cs.return (Expr.BinOp (e1, b, e2))
+    | App f -> Cs.return (f e1 e2)
     | Unhandled wt ->
         let type_info =
           match wt with

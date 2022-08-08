@@ -37,6 +37,7 @@ type t = {
   vars : (string, Global_var.t) Hashtbl.t;
   funs : (string, Func.t) Hashtbl.t;
   types : (string, Type.t) Hashtbl.t;
+  constrs : (string, unit) Hashtbl.t;
 }
 
 let of_symtab ~machine (symtab : Symtab.t) : t =
@@ -45,6 +46,7 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
       vars = Hashtbl.create 1;
       funs = Hashtbl.create 1;
       types = Hashtbl.create 1;
+      constrs = Hashtbl.create 1;
     }
   in
   symtab
@@ -73,6 +75,11 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
                  in
                  let func =
                    Func.{ symbol = name; params; return_type; location; body }
+                 in
+                 let () =
+                   match return_type with
+                   | Constructor -> Hashtbl.add env.constrs name ()
+                   | _ -> ()
                  in
                  Hashtbl.add env.funs name func
              | _ ->

@@ -37,7 +37,7 @@ module Binop_functions = struct
   let leq_maybe_ptr = "i__binop_lesseq_maybe_ptr"
   let add_maybe_ptr = "i__binop_add_maybe_ptr"
   let sub_maybe_ptr = "i__binop_sub_maybe_ptr"
-  let overflow_plus_u64 = "i__binop_overflow_plus_u64"
+  let overflow_plus_maybe_ptr = "i__binop_overflow_plus_maybe_ptr"
 end
 
 module Cast_functions = struct

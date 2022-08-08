@@ -113,4 +113,10 @@ let sanitize_program (prog : Program.t) =
       Hashtbl.add new_funs new_name new_fun)
     prog.funs;
 
-  { prog with funs = new_funs; vars = new_vars }
+  let new_constrs = Hashtbl.create (Hashtbl.length prog.constrs) in
+  Hashtbl.iter
+    (fun name () ->
+      let new_name = sanitize_symbol name in
+      Hashtbl.add new_constrs new_name ())
+    prog.constrs;
+  { prog with funs = new_funs; vars = new_vars; constrs = new_constrs }

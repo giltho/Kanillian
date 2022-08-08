@@ -35,9 +35,9 @@ let ptr_add_e p e =
 
 let ptr_add p i = ptr_add_e p (Expr.int i)
 
-let ptr_add_v p v =
-  let v = Expr.list_nth v 1 in
-  ptr_add_e p v
+let ptr_offset ~ctx ~ty p e =
+  let sty = Expr.int (Ctx.size_of ctx ty) in
+  ptr_add_e p (Expr.Infix.( * ) e sty)
 
 (* Allocates the memory with the right size, and
    returns a location expression, addressing the block *)

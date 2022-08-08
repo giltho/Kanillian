@@ -1,4 +1,5 @@
 open Gil_syntax
+open Gillian.Utils.Prelude
 module GExpr = Goto_lib.Expr
 module GType = Goto_lib.Type
 module Mem_interface = Memory_model.Interface
@@ -113,13 +114,23 @@ let set_global_env_proc (ctx : Ctx.t) =
   let functions = Hashtbl.to_seq_values ctx.prog.funs in
   let set_variables = Seq.concat_map (set_global_var ~ctx) variables in
   let set_functions = Seq.concat_map set_global_function functions in
+  let constructor_calls =
+    Seq.map
+      (fun c ->
+        let cmd = Cmd.Call ("u", Expr.string c, [], None, None) in
+        Body_item.make cmd)
+      (Hashset.to_seq ctx.prog.constrs)
+  in
   let ret =
     let b = Body_item.make in
     let assign = b @@ Cmd.Assignment (Kutils.Names.return_variable, Lit Null) in
     let ret = b Cmd.ReturnNormal in
     Seq.cons assign (Seq.return ret)
   in
-  let body = Seq.concat (List.to_seq [ set_variables; set_functions; ret ]) in
+  let body =
+    Seq.concat
+      (List.to_seq [ set_variables; set_functions; constructor_calls; ret ])
+  in
   let body = Array.of_seq body in
   Proc.
     {
@@ -149,10 +160,8 @@ let compile_free_locals (ctx : Ctx.t) =
 let compile_alloc_params ~ctx params =
   List.concat_map
     (fun (param, type_) ->
-      if
-        (not (Ctx.is_zst_access ctx type_))
-        && Ctx.representable_in_store ctx type_
-        && Ctx.in_memory ctx param
+      if Ctx.is_zst_access ctx type_ then []
+      else if Ctx.representable_in_store ctx type_ && Ctx.in_memory ctx param
       then
         let ptr, cmda = Memory.alloc_ptr ~ctx type_ in
         let cmdb = Memory.store_scalar ~ctx ptr (PVar param) type_ in

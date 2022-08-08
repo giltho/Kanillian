@@ -239,6 +239,7 @@ module Program : sig
     vars : (string, Global_var.t) Hashtbl.t;
     funs : (string, Func.t) Hashtbl.t;
     types : (string, Type.t) Hashtbl.t;
+    constrs : (string, unit) Hashtbl.t;
   }
 
   val of_symtab : machine:Machine_model.t -> Symtab.t -> t
