@@ -6,12 +6,12 @@ module DR = Delayed_result
 
 type err = Not_a_C_value of Expr.t
 
-(* A symbolic value in memory is just an expr, but
-   we maintain an abstraction around it to make sure
-   we properly do sanity checks at the boundaries *)
-
+(** A symbolic value in memory is just an expr, but
+   we maintain an abstraction around it in case we want
+   to change its implementation *)
 type t = Expr.t [@@deriving yojson]
 
+let of_expr e = e
 let alocs e = Expr.alocs e
 let lvars e = Expr.lvars e
 let substitution ~le_subst e = le_subst e
@@ -67,62 +67,6 @@ module Patterns = struct
     #&& ((typeof (list_nth x 0)) #== (type_ ObjectType))
     #&& ((typeof (list_nth x 1)) #== (type_ IntType))
 end
-
-(* Raise this exception when the right types
-   haven't been correctly assumed. *)
-
-let of_chunk_and_expr (chunk : Chunk.t) sval_e =
-  let open Patterns in
-  let open DR.Syntax in
-  let return = Delayed.return in
-  let* sval_e = Delayed.reduce sval_e in
-
-  let error = Error (Not_a_C_value sval_e) in
-
-  let assert_type ty =
-    let+ has_type = Delayed.has_type sval_e ty in
-    if has_type then Ok () else error
-  in
-  let in_bounds e =
-    match Chunk.bounds chunk with
-    | Some (low, high) ->
-        let open Formula.Infix in
-        e #>= (Expr.int_z low) #&& (e #<= (Expr.int_z high))
-    | None -> True
-  in
-  match (chunk, !Kconfig.archi) with
-  | U64, Arch64 | U32, Arch32 ->
-      (* It has to be either an integer or a pointer *)
-      if%ent integer sval_e then
-        if%ent in_bounds sval_e then DR.ok sval_e else return error
-      else
-        if%ent obj sval_e then
-          let loc_expr = Expr.list_nth sval_e 0 in
-          let ofs = Expr.list_nth sval_e 1 in
-          let* ofs = Delayed.reduce ofs in
-          let* loc_opt = Delayed.resolve_loc loc_expr in
-          let loc, learned =
-            match loc_opt with
-            | Some l -> (Expr.loc_from_loc_name l, [])
-            | None ->
-                let aloc = Expr.ALoc (ALoc.alloc ()) in
-                let learned =
-                  let open Formula.Infix in
-                  [ loc_expr #== aloc ]
-                in
-                (aloc, learned)
-          in
-          DR.ok ~learned (Expr.EList [ loc; ofs ])
-        else return error
-  | (U8 | I8 | U16 | I16 | I32 | U32 | I64 | U64 | I128 | U128), _ ->
-      let** () = assert_type IntType in
-      if%ent in_bounds sval_e then DR.ok sval_e else return error
-  | F64, _ ->
-      let++ () = assert_type NumberType in
-      sval_e
-  | F32, _ ->
-      let++ () = assert_type NumberType in
-      sval_e
 
 let sure_is_zero = function
   | Expr.Lit (Int z) when Z.equal z Z.zero -> true
@@ -271,10 +215,9 @@ module SVArray = struct
     | Arr (EList [ a ]) ->
         (* What's inside is technically already an sval,
            be we don't check sometimes so we might as well here.. *)
-        let++ v = of_chunk_and_expr chunk a in
-        Some v
-    | AllZeros -> DR.ok (Some (zero_of_chunk chunk))
-    | _ -> DR.ok None
+        Some a
+    | AllZeros -> Some (zero_of_chunk chunk)
+    | _ -> None
 
   let singleton e = Arr (Expr.EList [ e ])
 

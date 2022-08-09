@@ -21,14 +21,6 @@ type err =
   | LoadingPoison
   | Not_a_C_value of Expr.t
 
-let sval_of_chunk_and_expr chunk expr =
-  let open Delayed.Syntax in
-  let+ sval = SVal.of_chunk_and_expr chunk expr in
-  Result.map_error
-    (function
-      | SVal.Not_a_C_value e -> Not_a_C_value e)
-    sval
-
 exception FatalErr of err
 
 let pp_err fmt = function
@@ -242,11 +234,11 @@ module Node = struct
           Expr.pp at);
     let open Delayed.Syntax in
     match node with
-    | NotOwned Totally -> Delayed.return (NotOwned Totally, NotOwned Totally)
+    | NotOwned Totally -> (NotOwned Totally, NotOwned Totally)
     | NotOwned Partially -> failwith "Should never split a partially owned node"
     | MemVal { exact_perm; min_perm; mem_val } -> (
         let mk mem_val = MemVal { min_perm; exact_perm; mem_val } in
-        let make_pair left right = Delayed.return (mk left, mk right) in
+        let make_pair left right = (mk left, mk right) in
         match mem_val with
         | Zeros -> make_pair Zeros Zeros
         | Poisoned Totally -> make_pair (Poisoned Totally) (Poisoned Totally)
@@ -254,21 +246,18 @@ module Node = struct
         | Array { chunk; values } ->
             let open Expr.Infix in
             let mk_arr ~chunk values =
-              let+ value = SVArr.to_single_value ~chunk values in
+              let value = SVArr.to_single_value ~chunk values in
               match value with
-              | Ok (Some value) -> mk (Single { chunk; value })
-              | Ok None -> mk (Array { chunk; values })
-              | Error (Not_a_C_value e) ->
-                  (* Fixme: propagate the error properly *)
-                  Fmt.failwith "Not a C value: %a" Expr.pp e
+              | Some value -> mk (Single { chunk; value })
+              | None -> mk (Array { chunk; values })
             in
             let sz = Expr.int (Chunk.size chunk) in
             let len_left = (at - low) / sz in
             let len_right = (high - at) / sz in
             let left_arr = SVArr.array_sub values (Expr.int 0) len_left in
             let right_arr = SVArr.array_sub values len_left len_right in
-            let* left = mk_arr ~chunk left_arr in
-            let+ right = mk_arr ~chunk right_arr in
+            let left = mk_arr ~chunk left_arr in
+            let right = mk_arr ~chunk right_arr in
             (left, right)
         | Poisoned Partially ->
             failwith "Should never split a partially undef node")
@@ -389,7 +378,7 @@ module Node = struct
                     Some byte #>= (Expr.int 0) #&& (byte #<= (Expr.int 255)))
               bytes
           in
-          let** v = sval_of_chunk_and_expr chunk v in
+          let v = SVal.of_expr v in
           DR.ok ~learned v
         else
           let+ ret = SVal.any_of_chunk chunk in
@@ -427,18 +416,18 @@ module Node = struct
         match values with
         | AllZeros -> DR.ok (SVal.zero_of_chunk chunk, exact_perm)
         | Arr (EList [ a ]) ->
-            let++ sval = sval_of_chunk_and_expr chunk a in
-            (sval, exact_perm)
+            let sval = SVal.of_expr a in
+            DR.ok (sval, exact_perm)
         | AllUndef -> DR.error LoadingPoison
         | Arr l ->
-            let* () =
+            let+ () =
               let open Formula.Infix in
               Delayed.assert_
                 (Expr.list_length l) #== (Expr.int 1)
                 (Failure "Not an array")
             in
-            let++ sval = sval_of_chunk_and_expr chunk (Expr.list_nth l 0) in
-            (sval, exact_perm))
+            let sval = SVal.of_expr (Expr.list_nth l 0) in
+            Ok (sval, exact_perm))
     | MemVal { mem_val = Array { chunk = _; _ }; exact_perm; _ } ->
         let+ ret = SVal.any_of_chunk chunk in
         Ok (ret, exact_perm)
@@ -678,7 +667,7 @@ module Tree = struct
       ol #== nl
     then
       let at = nh in
-      let* left_node, right_node = Node.split ~span:old_span ~at t.node in
+      let left_node, right_node = Node.split ~span:old_span ~at t.node in
       let left_span, right_span = Range.split_at old_span at in
       let left = make ~node:left_node ~span:left_span () in
       let right = make ~node:right_node ~span:right_span () in
@@ -689,14 +678,14 @@ module Tree = struct
         oh #== nh
       then
         let at = nl in
-        let* left_node, right_node = Node.split ~span:old_span ~at t.node in
+        let left_node, right_node = Node.split ~span:old_span ~at t.node in
         let left_span, right_span = Range.split_at old_span nl in
         let left = make ~node:left_node ~span:left_span () in
         let right = make ~node:right_node ~span:right_span () in
         Delayed.return (right_node, left, right)
       else
         (* We're first splitting on the left then splitting again on the right *)
-        let* left_node, right_node = Node.split ~span:old_span ~at:nl t.node in
+        let left_node, right_node = Node.split ~span:old_span ~at:nl t.node in
         let left_span, right_span = Range.split_at old_span nl in
         let left = make ~node:left_node ~span:left_span () in
         let full_right = make ~node:right_node ~span:right_span () in

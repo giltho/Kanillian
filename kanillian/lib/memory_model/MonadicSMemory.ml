@@ -513,14 +513,6 @@ type action_ret = Success of (t * vt list) | Failure of err_t
 
 let make_branch ~heap ?(rets = []) () = (ref heap, rets)
 
-let sval_of_chunk_and_expr chunk expr =
-  let open Delayed.Syntax in
-  let+ sval = SVal.of_chunk_and_expr chunk expr in
-  Result.map_error
-    (function
-      | SVal.Not_a_C_value e -> Not_a_C_value e)
-    sval
-
 (* Init *)
 
 let init () = ref { genv = GEnv.empty; mem = Mem.empty }
@@ -589,7 +581,7 @@ let execute_store heap params =
   match params with
   | [ Expr.Lit (String chunk_name); loc; ofs; value ] ->
       let chunk = Chunk.of_string chunk_name in
-      let** sval = sval_of_chunk_and_expr chunk value in
+      let sval = SVal.of_expr value in
       let++ mem = Mem.store heap.mem loc chunk ofs sval in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "store" params
@@ -670,7 +662,7 @@ let execute_set_single heap params =
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let** sval = sval_of_chunk_and_expr chunk sval_e in
+      let sval = SVal.of_expr sval_e in
       let++ mem = Mem.set_single heap.mem loc ofs chunk sval perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params
