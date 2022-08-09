@@ -428,10 +428,12 @@ let compile_cast ~(ctx : Ctx.t) ~(from : GType.t) ~(into : GType.t) e :
         | U64, (U32 | U16 | U8)
         | U32, (U16 | U8)
         | U16, U8 ->
-            let to_mod_z = Expr.int_z Z.(one lsl Chunk.size into_chunk) in
+            let chunk_size_bits = Chunk.size into_chunk * 8 in
+            let to_mod_z = Expr.int_z Z.(one lsl chunk_size_bits) in
             App (fun e -> Expr.BinOp (e, IMod, to_mod_z))
         | I128, U128 | I64, U64 | I32, U32 | I16, U16 | I8, U8 ->
-            let two_power_size = Z.(one lsl Chunk.size into_chunk) in
+            let chunk_size_bits = Chunk.size into_chunk * 8 in
+            let two_power_size = Z.(one lsl chunk_size_bits) in
             let imax = Expr.int_z Z.((two_power_size asr 1) - one) in
             let two_power_size = Expr.int_z two_power_size in
             Proc
@@ -549,6 +551,13 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           | _ -> Error.code_error "Structure access is not in-memory-composit"
         in
         let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
+
+        (match field with
+        | "len" ->
+            Fmt.pr "Field len of type %a\nOFFSET: %d\n@?" GType.pp
+              (Ctx.resolve_type ctx lhs_ty)
+              field_offset
+        | _ -> ());
         let ptr = Memory.ptr_add ptr field_offset in
         if Ctx.representable_in_store ctx lvalue.type_ then
           (* I might have to perform the read here,

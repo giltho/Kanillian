@@ -201,15 +201,13 @@ let rec bit_offset_struct_field ~machine ~tag_lookup ty field =
     match components with
     | [] -> Gerror.unexpected "missing field for structure!"
     | Field { name; type_ } :: r ->
-        if name = field then acc
+        if String.equal name field then acc
         else
-          let acc = bit_size_of ~machine ~tag_lookup type_ in
+          let acc = acc + bit_size_of ~machine ~tag_lookup type_ in
           aux acc r
-    | Padding { name; bits } :: r ->
-        if name = field then acc
-        else
-          let acc = bits + acc in
-          aux acc r
+    | Padding { bits; _ } :: r ->
+        let acc = bits + acc in
+        aux acc r
   in
   match ty with
   | Struct { components; _ } | Union { components; _ } -> aux 0 components

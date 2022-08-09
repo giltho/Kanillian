@@ -23,7 +23,8 @@ proc i__binop_overflow_plus_maybe_ptr(v1, v2) {
         goto [ (typeOf v1) = Int ] llon loth;
   llon: goto [ (typeOf v2) = Int ] blon llro;
   blon: bounds := "i__archi_usize_bounds"();
-        ret := not ((l-nth(bounds, 0i) i<= ret) and (ret i<= l-nth(bounds, 1i)));
+        res := v1 i+ v2;
+        ret := not ((l-nth(bounds, 0i) i<= res) and (res i<= l-nth(bounds, 1i)));
         return;
   llro: goto [ typeOf(l-nth(v2, 0i)) = Obj ] llrp unde;
   llrp: offset := v1 i+ l-nth(v2, 1i);
