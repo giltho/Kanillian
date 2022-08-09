@@ -436,7 +436,10 @@ end = struct
     let expr_of_irep = Expr.of_irep ~machine in
     let unexpected = Gerror.unexpected ~irep in
     match (irep $ Statement).id with
-    | Skip -> Skip
+    | Skip
+    (* Ignoring AtomicBegin and AtomicEnd entirely *)
+    | AtomicBegin
+    | AtomicEnd -> Skip
     | Goto ->
         let label = irep $ Destination |> Irep.as_just_string in
         Goto label

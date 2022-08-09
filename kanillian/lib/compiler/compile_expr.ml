@@ -551,13 +551,6 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
           | _ -> Error.code_error "Structure access is not in-memory-composit"
         in
         let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
-
-        (match field with
-        | "len" ->
-            Fmt.pr "Field len of type %a\nOFFSET: %d\n@?" GType.pp
-              (Ctx.resolve_type ctx lhs_ty)
-              field_offset
-        | _ -> ());
         let ptr = Memory.ptr_add ptr field_offset in
         if Ctx.representable_in_store ctx lvalue.type_ then
           (* I might have to perform the read here,
@@ -846,10 +839,15 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       let+ e = compile_binop ~ctx ~lty ~rty op e1 e2 |> Cs.map_l b in
       Val_repr.ByValue e
   | UnOp { op; e } -> (
-      let* e = compile_expr e in
-      let e = Val_repr.as_value ~msg:"Unary operand" e in
+      let* comp_e = compile_expr e in
+      let comp_e = Val_repr.as_value ~msg:"Unary operand" comp_e in
       match op with
-      | Not -> by_value (Expr.Infix.not e)
+      | Not -> by_value (Expr.Infix.not comp_e)
+      | ObjectSize ->
+          let* size =
+            Memory.object_size ~ctx ~ptr_ty:e.type_ comp_e |> Cs.map_l b
+          in
+          by_value size
       | op ->
           let cmd = b (Helpers.assert_unhandled ~feature:(UnOp op) []) in
           Cs.return ~app:[ cmd ] (Val_repr.ByValue (Lit Nono)))

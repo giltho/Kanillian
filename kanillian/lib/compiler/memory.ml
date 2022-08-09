@@ -180,3 +180,13 @@ let write ~ctx ~(type_ : GType.t) ~annot ~(dst : Expr.t) ~(src : Val_repr.t) :
     | Val_repr.ByCompositValue { writes; _ } ->
         write_composit ~ctx ~annot ~dst writes
     | Val_repr.Procedure _ -> Error.code_error "Writing a procedure"
+
+let object_size ~ctx ~ptr_ty ptr : Expr.t Cs.with_cmds =
+  match (ptr_ty : GType.t) with
+  | Pointer ty when Ctx.is_zst_access ctx ty -> Cs.return Expr.zero_i
+  | Pointer _ ->
+      let temp = Ctx.fresh_v ctx in
+      let fct = Constants.Unop_functions.object_size in
+      let call = Cmd.Call (temp, Lit (String fct), [ ptr ], None, None) in
+      Cs.return ~app:[ call ] (Expr.PVar temp)
+  | _ -> Error.unexpected "ObjectSize of something that is not a pointer"

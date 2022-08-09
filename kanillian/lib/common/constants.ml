@@ -28,6 +28,10 @@ module Kanillian_names = struct
   let ret_label = "ret"
 end
 
+module Unop_functions = struct
+  let object_size = "i__unop_object_size"
+end
+
 module Binop_functions = struct
   let eq_maybe_ptr = "i__binop_equal_maybe_ptr"
   let neq_maybe_ptr = "i__binop_notequal_maybe_ptr"
