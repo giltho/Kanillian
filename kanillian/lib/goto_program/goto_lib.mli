@@ -245,7 +245,7 @@ module Program : sig
   val of_symtab : machine:Machine_model.t -> Symtab.t -> t
   val fold_functions : (string -> Func.t -> 'a -> 'a) -> t -> 'a -> 'a
   val fold_variables : (string -> Global_var.t -> 'a -> 'a) -> t -> 'a -> 'a
-  val is_zst : prog:t -> Type.t -> bool
+  val is_zst : prog:t -> machine:Machine_model.t -> Type.t -> bool
 end
 
 module Visitors : sig

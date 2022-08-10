@@ -22,12 +22,12 @@ proc i__free(ptr) {
 };
 
 proc i__memmove(ptr1, ptr2, sz) {
-      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), n);
+      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz);
       return
 };
 
 proc i__memcpy(ptr1, ptr2, sz) {
-      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), n);
+      ret := [mem_move](l-nth(ptr1, 0i), l-nth(ptr1, 1i), l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz);
       return
 };
 

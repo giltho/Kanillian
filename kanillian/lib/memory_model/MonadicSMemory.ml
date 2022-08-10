@@ -911,8 +911,11 @@ let pp_err fmt (e : err_t) =
 (* let str_of_err e = Format.asprintf "%a" pp_err e *)
 
 let pp fmt h =
-  Format.fprintf fmt "GEnv : @[%a@]@\nMem  : @[%a@]" GEnv.pp !h.genv
-    (Mem.pp ~genv:!h.genv) !h.mem
+  Format.fprintf fmt "GEnv : HIDDEN@\nMem  : @[%a@]"
+    (* GEnv.pp !h.genv *)
+    (* No need to print the genv really, it's just polluting... *)
+    (Mem.pp ~genv:!h.genv)
+    !h.mem
 
 let pp_by_need (_ : SS.t) fmt h = pp fmt h
 let get_print_info _ _ = (SS.empty, SS.empty)

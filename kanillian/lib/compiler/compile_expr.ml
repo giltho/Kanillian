@@ -123,11 +123,8 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Plus -> (
         match (lty, rty) with
-        | Pointer ty, CInteger (I_size_t | I_ssize_t) ->
-            App (Memory.ptr_offset ~ctx ~ty)
-        | CInteger (I_size_t | I_ssize_t), Pointer ty ->
-            App (fun x y -> Memory.ptr_offset ~ctx ~ty y x)
-        | CInteger (I_size_t | I_ssize_t), CInteger (I_size_t | I_ssize_t) ->
+        | ( (Pointer _ | CInteger (I_size_t | I_ssize_t)),
+            (Pointer _ | CInteger (I_size_t | I_ssize_t)) ) ->
             Proc add_maybe_ptr
         | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
             GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
@@ -165,6 +162,7 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Mod -> (
         match lty with
+        | CInteger I_size_t -> Proc mod_maybe_ptr
         | CInteger _ | Unsignedbv _ | Signedbv _ -> GilBinop IMod
         | _ -> Unhandled `With_type)
     | Or -> GilBinop BinOp.BOr
@@ -809,11 +807,23 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
              If the null pointer is not zero, I don't know what to do.
           *)
           assert ctx.machine.null_is_zero;
-          let assume =
+          let assume_not_null =
             let open Formula.Infix in
             b (Cmd.Logic (Assume (fnot ptr #== Expr.zero_i)))
           in
-          Cs.return ~app:[ assume ] (Val_repr.ByValue ptr)
+          let assume_not_max =
+            (* GotoC sometimes does arithmetics on zst pointers.
+               That leads to overflows! For that reason, we bound
+               the value to usize::MAX / 2 *)
+            let open Formula.Infix in
+            let max_i =
+              Z.((one lsl Int.sub ctx.machine.pointer_width 1) - one)
+            in
+            b (Cmd.Logic (Assume ptr #< (Expr.int_z max_i)))
+          in
+          Cs.return
+            ~app:[ assume_not_null; assume_not_max ]
+            (Val_repr.ByValue ptr)
           (* Should probably just return a long, with a nondet value that has the right offset *)
       | InMemoryScalar { ptr; _ }
       | InMemoryComposit { ptr; _ }
@@ -891,27 +901,35 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         "if branche exprs must be equal";
       Cs.return ~app:[ b ~label:end_lab Skip ] res_then
   | ByteExtract { e; offset } ->
-      let* e_repr = compile_expr e in
-      let* ptr_to_read =
-        match e_repr with
-        | ByCopy { ptr; _ } -> Cs.return ptr
-        | ByValue _ | ByCompositValue _ ->
-            let* ptr =
-              Memory.alloc_temp ~ctx ~location:expr.location e.type_
-              |> Cs.map_l b
-            in
-            let write =
-              Memory.write ~ctx ~annot:(b ~loop:[]) ~type_:e.type_ ~dst:ptr
-                ~src:e_repr
-            in
-            Cs.return ~app:write ptr
-        | Procedure _ -> Error.unexpected "Byte extracting a function"
-      in
-      let new_ptr = Memory.ptr_add ptr_to_read offset in
-      if Ctx.representable_in_store ctx expr.type_ then
-        let* var = Memory.load_scalar ~ctx new_ptr expr.type_ |> Cs.map_l b in
-        by_value (PVar var)
-      else by_copy new_ptr expr.type_
+      if Ctx.is_zst_access ctx e.type_ then
+        if Ctx.is_zst_access ctx expr.type_ && offset == 0 then
+          Cs.return Val_repr.null
+        else
+          Error.unexpected
+            (Fmt.str "Byte Extract of ZST that doesn't result in a ZST: %a"
+               GExpr.pp expr)
+      else
+        let* e_repr = compile_expr e in
+        let* ptr_to_read =
+          match e_repr with
+          | ByCopy { ptr; _ } -> Cs.return ptr
+          | ByValue _ | ByCompositValue _ ->
+              let* ptr =
+                Memory.alloc_temp ~ctx ~location:expr.location e.type_
+                |> Cs.map_l b
+              in
+              let write =
+                Memory.write ~ctx ~annot:(b ~loop:[]) ~type_:e.type_ ~dst:ptr
+                  ~src:e_repr
+              in
+              Cs.return ~app:write ptr
+          | Procedure _ -> Error.unexpected "Byte extracting a function"
+        in
+        let new_ptr = Memory.ptr_add ptr_to_read offset in
+        if Ctx.representable_in_store ctx expr.type_ then
+          let* var = Memory.load_scalar ~ctx new_ptr expr.type_ |> Cs.map_l b in
+          by_value (PVar var)
+        else by_copy new_ptr expr.type_
   | Struct elems ->
       let fields = Ctx.resolve_struct_components ctx expr.type_ in
       (* We start by getting the offsets where we need to write,

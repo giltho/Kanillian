@@ -1,6 +1,6 @@
 open Gillian.Utils.Prelude
 
-let representable_in_store ~prog (type_ : Type.t) =
+let representable_in_store ~prog ~machine (type_ : Type.t) =
   match type_ with
   | Bool
   | CInteger _
@@ -10,7 +10,7 @@ let representable_in_store ~prog (type_ : Type.t) =
   | Unsignedbv _
   | Pointer _
   | Empty -> true
-  | _ -> Program.is_zst ~prog type_
+  | _ -> Program.is_zst ~prog ~machine type_
 
 module Generators = struct
   let make prefix =
@@ -31,7 +31,7 @@ module Local = struct
   type t = { symbol : string; type_ : Type.t; location : Location.t }
 
   (** Returns the locals Hashtbl and the in_memory hashset *)
-  let gather ~prog stmt =
+  let gather ~prog ~machine stmt =
     let locals = Hashtbl.create 1 in
     let in_memory = Hashset.empty () in
     let visitor =
@@ -44,7 +44,8 @@ module Local = struct
           | Index { array = e; _ }
           | AddressOf e
           | ByteExtract { e; _ } -> super#visit_expr ~ctx:true e
-          | Symbol x when ctx || not (representable_in_store ~prog type_) ->
+          | Symbol x
+            when ctx || not (representable_in_store ~prog ~machine type_) ->
               Hashset.add in_memory x
           | _ -> super#visit_expr_value ~ctx ~type_ e
 
@@ -128,11 +129,14 @@ let is_zst_access ctx (ty : Type.t) =
   | Bool | Code _ -> false
   | _ -> size_of ctx ty == 0
 
-let representable_in_store ctx ty = representable_in_store ~prog:ctx.prog ty
+let representable_in_store ctx ty =
+  representable_in_store ~machine:ctx.machine ~prog:ctx.prog ty
 
 let with_entering_body ctx ~body ~params ~location =
   (* FIXME: params in memory should be assigned when entering function body! *)
-  let locals, in_memory = Local.gather ~prog:ctx.prog body in
+  let locals, in_memory =
+    Local.gather ~machine:ctx.machine ~prog:ctx.prog body
+  in
   List.iter
     (fun (p : Param.t) ->
       Option.iter

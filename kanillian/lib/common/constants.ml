@@ -2,6 +2,7 @@ module Internal_functions = struct
   let malloc = "i__malloc"
   let calloc = "i__calloc"
   let memmove = "i__memmove"
+  let memcpy = "i__memcpy"
   let store_zeros = "i__store_zeros"
   let loadv = "i__loadv"
   let storev = "i__storev"
@@ -15,6 +16,7 @@ module Internal_functions = struct
     | "malloc" -> Some malloc
     | "calloc" -> Some calloc
     | "memmove" -> Some memmove
+    | "memcpy" -> Some memcpy
     | _ -> None
 end
 
@@ -41,6 +43,7 @@ module Binop_functions = struct
   let leq_maybe_ptr = "i__binop_lesseq_maybe_ptr"
   let add_maybe_ptr = "i__binop_add_maybe_ptr"
   let sub_maybe_ptr = "i__binop_sub_maybe_ptr"
+  let mod_maybe_ptr = "i__binop_mod_maybe_ptr"
   let overflow_plus_maybe_ptr = "i__binop_overflow_plus_maybe_ptr"
 end
 

@@ -62,6 +62,19 @@ proc i__binop_sub_maybe_ptr(v1, v2) {
         return
 };
 
+proc i__binop_mod_maybe_ptr(v1, v2) {
+        goto [ (typeOf v1) = Int ] llon loth;
+  llon: goto [ (typeOf v2) = Int ] blon unde;
+  blon: ret := v1 i% v2;
+        return;
+  loth: goto [ typeOf(l-nth(v1, 0i)) = Obj ] lptr unde;
+  lptr: goto [ (typeOf v2) = Int ] lprl unde;
+  lprl: ret := l-nth(v1, 1i) i% v2;
+        return;
+  unde: fail[Arithmetics]("Invalid values for addition", v1, v2);
+        return
+};
+
 proc i__binop_lesseq_maybe_ptr(v1, v2) {
         goto [ ((typeOf v1) = Int) and ((typeOf v2) = Int) ] blon els;
   blon: ret := v1 i<= v2;

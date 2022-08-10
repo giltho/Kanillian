@@ -42,6 +42,7 @@ let ptr_offset ~ctx ~ty p e =
 (* Allocates the memory with the right size, and
    returns a location expression, addressing the block *)
 let alloc ~loc_var ~size : Expr.t * string Cmd.t =
+  if size == 0 then Fmt.failwith "OK ALLOCATING SOMETHING OF SIZE ZERO!";
   let alloc = Interface.(str_ac (AMem Alloc)) in
   let cmd = Cmd.LAction (loc_var, alloc, [ Expr.zero_i; Expr.int size ]) in
   let loc = Expr.list_nth (PVar loc_var) 0 in
@@ -57,6 +58,8 @@ let alloc_ptr ~ctx ty : Expr.t * string Cmd.t =
   (ptr, cmd)
 
 let alloc_temp ~ctx ~location ty : Expr.t Cs.with_cmds =
+  if Ctx.size_of ctx ty == 0 then
+    Fmt.failwith "OK ALLOCATING A TEMP OF SIZE ZERO: %a" GType.pp ty;
   let ptr, alloc_cmd = alloc_ptr ~ctx ty in
   let temp = Ctx.fresh_v ctx in
   let assign = Cmd.Assignment (temp, ptr) in

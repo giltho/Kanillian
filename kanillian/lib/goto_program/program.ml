@@ -102,8 +102,9 @@ let of_symtab ~machine (symtab : Symtab.t) : t =
 let fold_functions f prog acc = Hashtbl.fold f prog.funs acc
 let fold_variables f prog acc = Hashtbl.fold f prog.vars acc
 
-let rec is_zst ~prog (ty : Type.t) : bool =
+let is_zst ~prog ~machine (ty : Type.t) : bool =
   match ty with
-  | Array (_, 0) | Struct { components = []; _ } -> true
-  | StructTag s -> Hashtbl.find prog.types s |> is_zst ~prog
-  | _ -> false
+  | Bool | Code _ | Constructor -> false
+  | _ ->
+      let tag_lookup = Hashtbl.find prog.types in
+      Type.bit_size_of ~machine ~tag_lookup ty == 0

@@ -210,7 +210,16 @@ let rec bit_offset_struct_field ~machine ~tag_lookup ty field =
         aux acc r
   in
   match ty with
-  | Struct { components; _ } | Union { components; _ } -> aux 0 components
+  | Struct { components; _ } -> aux 0 components
+  | Union { components; _ } ->
+      if
+        List.exists
+          (function
+            | Typedefs__.Field { name; _ } -> String.equal name field
+            | _ -> false)
+          components
+      then 0
+      else Gerror.unexpected "missing field for union!"
   | StructTag s | UnionTag s ->
       bit_offset_struct_field ~machine ~tag_lookup (tag_lookup s) field
   | _ ->

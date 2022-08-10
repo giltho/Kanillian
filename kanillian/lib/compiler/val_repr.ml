@@ -65,3 +65,5 @@ let copy_into (v : t) (x : string) : t Cs.with_cmds =
   | ByCompositValue { type_; _ } ->
       let cmd = assert_unhandled ~feature:ByCompositValueCopyInto [] in
       Cs.return ~app:[ cmd ] (ByCopy { ptr = Expr.Lit Nono; type_ })
+
+let null = ByValue (Expr.Lit Null)
