@@ -468,23 +468,15 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
     in
     let as_access = lvalue_as_access ~ctx ~read in
     match lvalue.value with
-    | Struct _ ->
-        let cmd = b (assert_unhandled ~feature:(ConstantLValue "Struct") []) in
-        Cs.return ~app:[ cmd ]
-          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
-    | Array _ ->
-        let cmd = b (assert_unhandled ~feature:(ConstantLValue "Array") []) in
-        Cs.return ~app:[ cmd ]
-          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
-    | StringConstant _ ->
-        let* string_value = compile_expr ~ctx lvalue in
+    | Struct _ | Array _ | StringConstant _ ->
+        let* composit_value = compile_expr ~ctx lvalue in
         let* ptr =
           Memory.alloc_temp ~ctx ~location:lvalue.location lvalue.type_
           |> Cs.map_l b
         in
         let* () =
           ( (),
-            Memory.write ~ctx ~type_:lvalue.type_ ~dst:ptr ~src:string_value
+            Memory.write ~ctx ~type_:lvalue.type_ ~dst:ptr ~src:composit_value
               ~annot:(b ~loop:[]) )
         in
         Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })

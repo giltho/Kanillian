@@ -17,13 +17,10 @@ module Unhandled = struct
   type feature =
     | ByCompositValueCopyInto
     | OutputStmt
-    | ConstantLValue of string
     | FlexibleArrayMember
     | CompositNondet of Type.t
     | BinOp of Ops.Binary.t * (Type.t * Type.t) option
     | UnOp of Ops.Unary.t
-    | LoadScalar of Type.t
-    | StoreScalar of Type.t
     | Cast of Type.t * Type.t
     | ExprIrep of Irep_lib.Id.t * string
     | StmtIrep of Irep_lib.Id.t
@@ -32,7 +29,6 @@ module Unhandled = struct
     | ByCompositValueCopyInto -> "ByCompositValueCopyInto"
     | CompositNondet ty -> "CompositNondet::" ^ Type.show_simple ty
     | OutputStmt -> "OutputStmt"
-    | ConstantLValue s -> "ConstantLValue::" ^ s
     | FlexibleArrayMember -> "FlexibleArrayMember"
     | UnOp unop -> "Unop::" ^ Ops.Unary.show unop
     | BinOp (b, types) -> (
@@ -42,8 +38,6 @@ module Unhandled = struct
         | None -> ""
         | Some (ta, tb) ->
             "::" ^ Type.show_simple ta ^ "::" ^ Type.show_simple tb)
-    | LoadScalar t -> "LoadScalar::" ^ Type.show_simple t
-    | StoreScalar t -> "StoreScalar::" ^ Type.show_simple t
     | Cast (from, to_) ->
         "Cast::" ^ Type.show_simple from ^ "::" ^ Type.show_simple to_
     | ExprIrep (id, msg) -> "ExprIrep::" ^ Irep_lib.Id.to_string id ^ "::" ^ msg

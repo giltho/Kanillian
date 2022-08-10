@@ -89,8 +89,7 @@ let dealloc_local ~ctx (l : Ctx.Local.t) : Body_item.t =
 let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
   match chunk_for_type ~ctx t with
   | None ->
-      let cmd = Helpers.assert_unhandled ~feature:(LoadScalar t) [ e ] in
-      Cs.return ~app:[ cmd ] "UNREACHABLE"
+      Error.code_error (Fmt.str "load_scalar - unexpected type: %a" GType.pp t)
   | Some chunk ->
       let chunk = Expr.Lit (String (Chunk.to_string chunk)) in
       let var =
@@ -107,7 +106,8 @@ let load_scalar ~ctx ?var (e : Expr.t) (t : GType.t) : string Cs.with_cmds =
 let store_scalar ~ctx ?var (p : Expr.t) (v : Expr.t) (t : GType.t) :
     string Cmd.t =
   match chunk_for_type ~ctx t with
-  | None -> Helpers.assert_unhandled ~feature:(StoreScalar t) []
+  | None ->
+      Error.code_error (Fmt.str "store_scalar - unexpected type: %a" GType.pp t)
   | Some chunk ->
       let chunk = Expr.Lit (String (Chunk.to_string chunk)) in
       let var =
