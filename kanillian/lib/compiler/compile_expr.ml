@@ -477,11 +477,17 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
         Cs.return ~app:[ cmd ]
           (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
     | StringConstant _ ->
-        let cmd =
-          b (assert_unhandled ~feature:(ConstantLValue "StringConstant") [])
+        let* string_value = compile_expr ~ctx lvalue in
+        let* ptr =
+          Memory.alloc_temp ~ctx ~location:lvalue.location lvalue.type_
+          |> Cs.map_l b
         in
-        Cs.return ~app:[ cmd ]
-          (InMemoryComposit { ptr = Lit Nono; type_ = lvalue.type_ })
+        let* () =
+          ( (),
+            Memory.write ~ctx ~type_:lvalue.type_ ~dst:ptr ~src:string_value
+              ~annot:(b ~loop:[]) )
+        in
+        Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
     | Symbol x ->
         if Ctx.is_local ctx x then
           if not (Ctx.representable_in_store ctx lvalue.type_) then

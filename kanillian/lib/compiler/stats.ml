@@ -16,10 +16,7 @@ end
 module Unhandled = struct
   type feature =
     | ByCompositValueCopyInto
-    | CallArgumentByCopy
-    | ByteExtract
     | OutputStmt
-    | ZstAddress
     | ConstantLValue of string
     | FlexibleArrayMember
     | CompositNondet of Type.t
@@ -34,10 +31,7 @@ module Unhandled = struct
   let feature_to_string = function
     | ByCompositValueCopyInto -> "ByCompositValueCopyInto"
     | CompositNondet ty -> "CompositNondet::" ^ Type.show_simple ty
-    | CallArgumentByCopy -> "CallArgumentByCopy"
-    | ByteExtract -> "ByteExtract"
     | OutputStmt -> "OutputStmt"
-    | ZstAddress -> "ZstAddress"
     | ConstantLValue s -> "ConstantLValue::" ^ s
     | FlexibleArrayMember -> "FlexibleArrayMember"
     | UnOp unop -> "Unop::" ^ Ops.Unary.show unop
