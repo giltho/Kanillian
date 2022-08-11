@@ -39,7 +39,7 @@ let ptr_offset ~ctx ~ty p e =
   let sty = Expr.int (Ctx.size_of ctx ty) in
   ptr_add_e p (Expr.Infix.( * ) e sty)
 
-(* Allocates the memory with the right size, and
+(** Allocates the memory with the right size, and
    returns a location expression, addressing the block *)
 let alloc ~loc_var ~size : Expr.t * string Cmd.t =
   if size == 0 then Fmt.failwith "OK ALLOCATING SOMETHING OF SIZE ZERO!";
@@ -48,7 +48,7 @@ let alloc ~loc_var ~size : Expr.t * string Cmd.t =
   let loc = Expr.list_nth (PVar loc_var) 0 in
   (loc, cmd)
 
-(* Allocates the memory with the right size, and
+(** Allocates the memory with the right size, and
    returns a pointer expression pointing to the
    beginning of the allocated block. *)
 let alloc_ptr ~ctx ty : Expr.t * string Cmd.t =
