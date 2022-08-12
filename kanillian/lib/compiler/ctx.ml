@@ -1,6 +1,32 @@
 open Gillian.Utils.Prelude
 
-let representable_in_store ~prog ~machine (type_ : Type.t) =
+let one_representable_field ~(prog : Program.t) ~machine dt =
+  let rec orf (ty : Type.t) =
+    match ty with
+    | CInteger _ | Float | Double | Signedbv _ | Unsignedbv _ | Pointer _ ->
+        Some ([], ty)
+    | Struct { components; _ } -> component_search None components
+    | StructTag tag -> orf (Hashtbl.find prog.types tag)
+    | _ -> None
+  and component_search field (dt : Datatype_component.t list) =
+    match (field, dt) with
+    | Some x, [] -> Some x
+    | None, [] -> None
+    | Some _, Field { type_; _ } :: r ->
+        if Program.is_zst ~prog ~machine type_ then component_search field r
+        else None
+    | None, Field { type_; name } :: r -> (
+        if Program.is_zst ~prog ~machine type_ then component_search field r
+        else
+          match orf type_ with
+          | Some (fields, type_) ->
+              component_search (Some (name :: fields, type_)) r
+          | None -> None)
+    | _, Padding _ :: _ -> None
+  in
+  component_search None dt
+
+let rec representable_in_store ~prog ~machine (type_ : Type.t) =
   match type_ with
   | Bool
   | CInteger _
@@ -10,6 +36,11 @@ let representable_in_store ~prog ~machine (type_ : Type.t) =
   | Unsignedbv _
   | Pointer _
   | Empty -> true
+  | Struct { components; _ } ->
+      Program.is_zst ~prog ~machine type_
+      || Option.is_some (one_representable_field ~prog ~machine components)
+  | StructTag tag ->
+      representable_in_store ~prog ~machine (Hashtbl.find prog.types tag)
   | _ -> Program.is_zst ~prog ~machine type_
 
 module Generators = struct
@@ -40,10 +71,7 @@ module Local = struct
 
         method! visit_expr_value ~ctx ~type_ (e : Expr.value) =
           match e with
-          | Member { lhs = e; _ }
-          | Index { array = e; _ }
-          | AddressOf e
-          | ByteExtract { e; _ } -> super#visit_expr ~ctx:true e
+          | AddressOf e | ByteExtract { e; _ } -> super#visit_expr ~ctx:true e
           | Symbol x
             when ctx || not (representable_in_store ~prog ~machine type_) ->
               Hashset.add in_memory x
@@ -178,3 +206,6 @@ let ptr_64 ctx =
   match archi ctx with
   | Arch32 -> false
   | Arch64 -> true
+
+let one_representable_field ctx ty =
+  one_representable_field ~prog:ctx.prog ~machine:ctx.machine ty

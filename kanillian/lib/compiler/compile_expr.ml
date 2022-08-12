@@ -217,7 +217,7 @@ let fresh_sv ctx =
   let cmd = Cmd.Logic (FreshSVar v) in
   Cs.return ~app:[ cmd ] v
 
-let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
+let rec assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   let open Cs.Syntax in
   (* TODO: I should probably be assuming the *)
   match type_ with
@@ -264,6 +264,15 @@ let assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   | Bool ->
       let assume_bool = Cmd.Logic (AssumeType (expr, BooleanType)) in
       Cs.unit [ assume_bool ]
+  | StructTag _ | Struct _ ->
+      let ty =
+        let fields = Ctx.resolve_struct_components ctx type_ in
+        match Ctx.one_representable_field ctx fields with
+        | Some (_, ty) -> ty
+        | None ->
+            Error.code_error "No representable type for assume_type struct"
+      in
+      assume_type ~ctx ty expr
   | _ -> Error.code_error "Unreachable: assume_type for non-scalar"
 
 let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
@@ -288,28 +297,32 @@ let rec nondet_expr ~ctx ~loc ~type_ () : Val_repr.t Cs.with_body =
     match type_ with
     | StructTag tag | UnionTag tag ->
         nondet_expr ~ctx ~loc ~type_:(Ctx.tag_lookup ctx tag) ()
-    | Struct { components; _ } ->
-        let rec writes curr components () =
-          match components with
-          | [] -> Seq.Nil
-          | Datatype_component.Padding { bits; _ } :: fields ->
-              (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
-              let byte_width = bits / 8 in
-              Cons
-                ( (curr, Val_repr.Poison { byte_width }),
-                  writes (curr + byte_width) fields )
-          | Field { type_; _ } :: fields ->
-              let rest = writes (curr + Ctx.size_of ctx type_) fields in
-              if Ctx.is_zst_access ctx type_ then rest ()
-              else
-                Cons
-                  ( ( curr,
-                      Val_repr.V
-                        { type_; value = nondet_expr ~ctx ~loc ~type_ () } ),
-                    rest )
-        in
-        let writes = writes 0 components in
-        Cs.return (Val_repr.ByCompositValue { type_; writes })
+    | Struct { components; _ } -> (
+        match Ctx.one_representable_field ctx components with
+        | None ->
+            let rec writes curr components () =
+              match components with
+              | [] -> Seq.Nil
+              | Datatype_component.Padding { bits; _ } :: fields ->
+                  (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
+                  let byte_width = bits / 8 in
+                  Cons
+                    ( (curr, Val_repr.Poison { byte_width }),
+                      writes (curr + byte_width) fields )
+              | Field { type_; _ } :: fields ->
+                  let rest = writes (curr + Ctx.size_of ctx type_) fields in
+                  if Ctx.is_zst_access ctx type_ then rest ()
+                  else
+                    Cons
+                      ( ( curr,
+                          Val_repr.V
+                            { type_; value = nondet_expr ~ctx ~loc ~type_ () }
+                        ),
+                        rest )
+            in
+            let writes = writes 0 components in
+            Cs.return (Val_repr.ByCompositValue { type_; writes })
+        | Some (_, type_) -> nondet_expr ~ctx ~loc ~type_ ())
     | Array (ty, sz) ->
         let rec writes cur () =
           if cur == sz then Seq.Nil
@@ -539,20 +552,51 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
         if Ctx.representable_in_store ctx lvalue.type_ then
           Cs.return (InMemoryScalar { ptr; loaded = None })
         else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
-    | Member { lhs; field } ->
+    | Member { lhs; field } -> (
         let* lhs_access = as_access lhs in
-        let ptr, lhs_ty =
-          match lhs_access with
-          | InMemoryComposit { ptr; type_ } -> (ptr, type_)
-          | _ -> Error.code_error "Structure access is not in-memory-composit"
-        in
-        let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
-        let ptr = Memory.ptr_add ptr field_offset in
-        if Ctx.representable_in_store ctx lvalue.type_ then
-          (* I might have to perform the read here,
-             in case fake-read is necessary *)
-          Cs.return (InMemoryScalar { ptr; loaded = None })
-        else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
+        match lhs_access with
+        | InMemoryComposit { ptr; type_ = lhs_ty } ->
+            let field_offset = Ctx.offset_struct_field ctx lhs_ty field in
+            let ptr = Memory.ptr_add ptr field_offset in
+            if Ctx.representable_in_store ctx lvalue.type_ then
+              (* I might have to perform the read here,
+                 in case fake-read is necessary *)
+              Cs.return (InMemoryScalar { ptr; loaded = None })
+            else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
+        | Direct _ | InMemoryScalar _ ->
+            (* This is the case where the structure has one non-zst type that
+               is also representable in store, and can therefore be
+               represented transparently in the store *)
+            let () =
+              (* Bunch of sanity checks *)
+              let () =
+                match lhs.type_ with
+                | Struct _ | StructTag _ -> ()
+                | _ ->
+                    Error.code_error
+                      (Fmt.str
+                         "Member direct access, expected a structure type but \
+                          got %a"
+                         GType.pp lhs.type_)
+              in
+              let components = Ctx.resolve_struct_components ctx lhs.type_ in
+              match Ctx.one_representable_field ctx components with
+              | None ->
+                  Error.code_error
+                    "Expected one representable field in structure direct \
+                     access"
+              | Some (or_field :: _, _) when not (String.equal or_field field)
+                ->
+                  Error.code_error
+                    "Mismatch in one representable field in structure direct \
+                     access"
+              | _ -> ()
+            in
+            Cs.return lhs_access
+        | _ ->
+            Error.code_error
+              (Fmt.str "Structure access is not in-memory-composit but %a"
+                 pp_access lhs_access))
     | _ ->
         Error.code_error
           (Fmt.str "lvalue_as_access for something that isn't an lvalue: %a"
@@ -928,34 +972,60 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
           let* var = Memory.load_scalar ~ctx new_ptr expr.type_ |> Cs.map_l b in
           by_value (PVar var)
         else by_copy new_ptr expr.type_
-  | Struct elems ->
+  | Struct elems -> (
       let fields = Ctx.resolve_struct_components ctx expr.type_ in
-      (* We start by getting the offsets where we need to write,
-         we do that on the type. *)
-      let rec writes curr fields elems () =
-        match (fields, elems) with
-        | [], [] -> Seq.Nil
-        | Datatype_component.Padding { bits; _ } :: fields, _ :: elems
-        (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
-          ->
-            let byte_width = bits / 8 in
-            Cons
-              ( (curr, Val_repr.Poison { byte_width }),
-                writes (curr + byte_width) fields elems )
-        | Field { type_; _ } :: fields, _ :: elems
-          when Ctx.is_zst_access ctx type_ ->
-            (* If the field is a ZST, we simply ignore it *)
-            writes (curr + Ctx.size_of ctx type_) fields elems ()
-        | Field { type_; _ } :: fields, v :: elems ->
-            Cons
-              ( (curr, Val_repr.V { type_; value = compile_expr v }),
-                writes (curr + Ctx.size_of ctx type_) fields elems )
-        | _ ->
-            Error.unexpected
-              "Struct type fields not maching struct constant fields"
-      in
-      let writes = writes 0 fields elems in
-      Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes })
+      match Ctx.one_representable_field ctx fields with
+      | Some (accesses, _) ->
+          let select_field accesses fields elems =
+            let rec select_field ac f e =
+              match (ac, f, e) with
+              | a :: ar, Datatype_component.Field { name; type_ } :: af, e :: er
+                ->
+                  if String.equal a name then on_field ar type_ e
+                  else select_field ac af er
+              | _ :: _, Datatype_component.Padding _ :: af, _ :: er ->
+                  select_field ac af er
+              | _ -> Error.code_error "Wrong field mapping"
+            and on_field a t e =
+              match (a, t, e) with
+              | [], _, e -> e
+              | ( _ :: _,
+                  (StructTag _ | Struct _),
+                  GExpr.{ value = GExpr.Struct elems; _ } ) ->
+                  let fields = Ctx.resolve_struct_components ctx t in
+                  select_field a fields elems
+              | _ -> Error.code_error "Wrong field mapping"
+            in
+            select_field accesses fields elems
+          in
+          compile_expr (select_field accesses fields elems)
+      | None ->
+          (* We start by getting the offsets where we need to write,
+             we do that on the type. *)
+          let rec writes curr fields elems () =
+            match (fields, elems) with
+            | [], [] -> Seq.Nil
+            | Datatype_component.Padding { bits; _ } :: fields, _ :: elems
+            (* Ignoring what's written in the padding, probably a nondet, in any case it should be poison. *)
+              ->
+                let byte_width = bits / 8 in
+                Cons
+                  ( (curr, Val_repr.Poison { byte_width }),
+                    writes (curr + byte_width) fields elems )
+            | Field { type_; _ } :: fields, _ :: elems
+              when Ctx.is_zst_access ctx type_ ->
+                (* If the field is a ZST, we simply ignore it *)
+                writes (curr + Ctx.size_of ctx type_) fields elems ()
+            | Field { type_; _ } :: fields, v :: elems ->
+                Cons
+                  ( (curr, Val_repr.V { type_; value = compile_expr v }),
+                    writes (curr + Ctx.size_of ctx type_) fields elems )
+            | _ ->
+                Error.unexpected
+                  "Struct type fields not maching struct constant fields"
+          in
+          let writes = writes 0 fields elems in
+          Cs.return (Val_repr.ByCompositValue { type_ = expr.type_; writes }))
   | Array elems ->
       let elem_type =
         match expr.type_ with

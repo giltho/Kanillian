@@ -2,7 +2,7 @@ open Gil_syntax
 module GType = Goto_lib.Type
 module Interface = Memory_model.Interface
 
-let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
+let rec chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
   let res =
     match t with
     | CInteger I_bool ->
@@ -23,6 +23,10 @@ let chunk_for_type ~(ctx : Ctx.t) (t : GType.t) : Chunk.t option =
     | Double -> Some F64
     | Pointer _ ->
         Chunk.of_int_type ~signed:false ~size:ctx.machine.pointer_width
+    | StructTag t -> chunk_for_type ~ctx (Ctx.tag_lookup ctx t)
+    | Struct { components; _ } ->
+        Option.bind (Ctx.one_representable_field ctx components) (fun (_, ty) ->
+            chunk_for_type ~ctx ty)
     | _ -> None
   in
   res
