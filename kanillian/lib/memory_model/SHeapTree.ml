@@ -5,6 +5,7 @@ module DO = Delayed_option
 module SS = Utils.Containers.SS
 module SVArr = SVal.SVArray
 module CoreP = Predicates.Core
+open SVal
 
 let log_string s = Logging.verbose (fun fmt -> fmt "SHEAPTREE CHECKING: %s" s)
 
@@ -19,7 +20,6 @@ type err =
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison
-  | Not_a_C_value of Expr.t
 
 exception FatalErr of err
 
@@ -38,7 +38,6 @@ let pp_err fmt = function
   | WrongMemVal -> Fmt.pf fmt "WrongMemVal"
   | MemoryNotFreed -> Fmt.pf fmt "MemoryNotFreed"
   | LoadingPoison -> Fmt.pf fmt "LoadingPoison"
-  | Not_a_C_value e -> Fmt.pf fmt "Not_a_C_value"
 
 let err_equal a b =
   match (a, b) with
@@ -129,22 +128,10 @@ module Node = struct
   type mem_val =
     | Zeros
     | Poisoned of qty
-    | Single of { chunk : Chunk.t; value : SVal.t }
-    | Array of { chunk : Chunk.t; values : SVArr.t }
+    | Single of SVal.t
+    | Array of SVArr.t
+    | LazyValue
   [@@deriving yojson]
-
-  let eq_mem_val ma mb =
-    match (ma, mb) with
-    | Zeros, Zeros
-    | Poisoned Totally, Poisoned Totally
-    | Poisoned Partially, Poisoned Partially -> true
-    | ( Single { chunk = chunka; value = valuea },
-        Single { chunk = chunkb; value = valueb } )
-      when Chunk.equal chunka chunkb && SVal.equal valuea valueb -> true
-    | ( Array { chunk = chunka; values = valuesa },
-        Array { chunk = chunkb; values = valuesb } )
-      when Chunk.equal chunka chunkb && SVArr.equal valuesa valuesb -> true
-    | _ -> false
 
   type t =
     | NotOwned of qty
@@ -189,12 +176,13 @@ module Node = struct
         | Poisoned qty ->
             Fmt.pf fmt "%s POISONED (%a)" (str_qty qty)
               (Fmt.Dump.option Perm.pp) exact_perm
-        | Single { chunk; value } ->
-            Fmt.pf fmt "(%a : %s) (%a)" SVal.pp value (Chunk.to_string chunk)
-              (Fmt.Dump.option Perm.pp) exact_perm
-        | Array { chunk; values } ->
-            Fmt.pf fmt "(%a : many %s) (%a)" SVArr.pp values
-              (Chunk.to_string chunk) (Fmt.Dump.option Perm.pp) exact_perm)
+        | Single sval ->
+            Fmt.pf fmt "%a (%a)" SVal.pp sval (Fmt.Dump.option Perm.pp)
+              exact_perm
+        | Array svarr ->
+            Fmt.pf fmt "%a (%a)" SVArr.pp svarr (Fmt.Dump.option Perm.pp)
+              exact_perm
+        | LazyValue -> Fmt.pf fmt "NOT EVALUATED YET")
 
   let check_perm required node =
     match required with
@@ -213,60 +201,39 @@ module Node = struct
     | MemVal { exact_perm = None; _ } -> `KeepLooking
     | MemVal { exact_perm = Some x; _ } -> `StopLooking (Ok x)
 
-  (* let equal a b =
-     match (a, b) with
-     | NotOwned x, NotOwned y -> x == y
-     | ( MemVal { min_perm = min_perma; exact_perm = ex_perma; mem_val = vala },
-         MemVal { min_perm = min_permb; exact_perm = ex_permb; mem_val = valb } )
-       -> (
-         min_perma == min_permb && ex_perma == ex_permb
-         &&
-         match (vala, valb) with
-         | Poisoned x, Poisoned y -> x == y
-         | Single { chunk = ca; value = va }, Single { chunk = cb; value = vb }
-           -> Chunk.equal ca cb && SVal.equal va vb
-         | _ -> false )
-     | _ -> false *)
-
   let split ~span:(low, high) ~at node =
     Logging.tmi (fun m ->
         m "ABOUT TO SPLIT NODE THAT HAS SPAN %a AT %a" Range.pp (low, high)
           Expr.pp at);
     let open Delayed.Syntax in
     match node with
-    | NotOwned Totally -> (NotOwned Totally, NotOwned Totally)
+    | NotOwned Totally -> Delayed.return (NotOwned Totally, NotOwned Totally)
     | NotOwned Partially -> failwith "Should never split a partially owned node"
     | MemVal { exact_perm; min_perm; mem_val } -> (
         let mk mem_val = MemVal { min_perm; exact_perm; mem_val } in
-        let make_pair left right = (mk left, mk right) in
+        let make_pair left right = Delayed.return (mk left, mk right) in
         match mem_val with
         | Zeros -> make_pair Zeros Zeros
         | Poisoned Totally -> make_pair (Poisoned Totally) (Poisoned Totally)
-        | Single _ -> make_pair (Poisoned Totally) (Poisoned Totally)
-        | Array { chunk; values } ->
-            let open Expr.Infix in
-            let mk_arr ~chunk values =
-              let value = SVArr.to_single_value ~chunk values in
-              match value with
-              | Some value -> mk (Single { chunk; value })
-              | None -> mk (Array { chunk; values })
-            in
-            let sz = Expr.int (Chunk.size chunk) in
-            let len_left = (at - low) / sz in
-            let len_right = (high - at) / sz in
-            let left_arr = SVArr.array_sub values (Expr.int 0) len_left in
-            let right_arr = SVArr.array_sub values len_left len_right in
-            let left = mk_arr ~chunk left_arr in
-            let right = mk_arr ~chunk right_arr in
-            (left, right)
-        | Poisoned Partially ->
-            failwith "Should never split a partially undef node")
+        | Single sval ->
+            (* The sound approach right now is to transform the value into an array
+               of byte and then split that in two *)
+            let* svarr = SVArr.byte_array_of_sval sval in
+            let at = Expr.Infix.(at - low) in
+            let left, right = SVArr.split_at_offset ~at svarr in
+            make_pair (Array left) (Array right)
+        | Array arr ->
+            let at = Expr.Infix.(at - low) in
+            let* left, right = SVArr.split_at_byte ~at arr in
+            make_pair (Array left) (Array right)
+        | Poisoned Partially | LazyValue ->
+            failwith "Intermediate node, should never be split")
 
-  let merge ~left ~right =
-    let open SVal.Infix in
+  let rec merge ~left ~right =
     let ret = Delayed.return in
-    let a, size_a = left in
-    let b, size_b = right in
+    let open Delayed.Syntax in
+    let a, size_left = left in
+    let b, size_right = right in
     match (a, b) with
     | NotOwned Totally, NotOwned Totally -> ret (NotOwned Totally)
     | NotOwned _, _ | _, NotOwned _ -> ret (NotOwned Partially)
@@ -280,238 +247,188 @@ module Node = struct
           | _, _ -> None
         in
         let mk mem_val = MemVal { min_perm; mem_val; exact_perm } in
+        let array arr = ret (mk (Array arr)) in
+        let lazy_value = ret (mk LazyValue) in
+        let zeros = ret (mk Zeros) in
         match (vala, valb) with
-        | Zeros, Zeros -> ret (mk Zeros)
+        | Zeros, Zeros -> zeros
         | Poisoned Totally, Poisoned Totally -> ret (mk (Poisoned Totally))
-        | ( Single { chunk = chunk_l; value = value_l },
-            Single { chunk = chunk_r; value = value_r } )
-          when Chunk.equal chunk_l chunk_r -> (
-            match value_l ^: SVArr.singleton value_r with
-            | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Poisoned Partially)))
-        | ( Single { chunk = chunk_l; value = value_l },
-            Array { chunk = chunk_r; values = values_r } )
-          when Chunk.equal chunk_l chunk_r -> (
-            match value_l ^: values_r with
-            | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Poisoned Partially)))
-        | ( Array { chunk = chunk_l; values = values_l },
-            Single { chunk = chunk_r; value = value_r } )
-          when Chunk.equal chunk_l chunk_r -> (
-            match values_l @: SVArr.singleton value_r with
-            | Some values -> ret (mk (Array { chunk = chunk_l; values }))
-            | None -> ret (mk (Poisoned Partially)))
-        | ( Array { chunk = chunk_l; values = values_l },
-            Array { chunk = chunk_r; values = values_r } )
-          when Chunk.equal chunk_l chunk_r ->
-            let size_l, size_r =
-              let open Expr.Infix in
-              let size_chunk = Expr.int (Chunk.size chunk_l) in
-              (size_a / size_chunk, size_b / size_chunk)
-            in
-            Delayed.map
-              (SVArr.concat_knowing_size (values_l, size_l) (values_r, size_r))
-              (fun values -> mk (Array { chunk = chunk_l; values }))
-        | Array { chunk; values }, Poisoned _ ->
-            let size_l, size_r =
-              let open Expr.Infix in
-              let size_chunk = Expr.int (Chunk.size chunk) in
-              (size_a / size_chunk, size_b / size_chunk)
-            in
-            Delayed.map
-              (SVArr.concat_knowing_size (values, size_l) (AllUndef, size_r))
-              (fun values -> mk (Array { chunk; values }))
-        | Array { chunk; values }, Zeros ->
-            let size_l, size_r =
-              let open Expr.Infix in
-              let size_chunk = Expr.int (Chunk.size chunk) in
-              (size_a / size_chunk, size_b / size_chunk)
-            in
-            Delayed.map
-              (SVArr.concat_knowing_size (values, size_l) (AllZeros, size_r))
-              (fun values -> mk (Array { chunk; values }))
-        | Poisoned _, Array { chunk; values } ->
-            let size_l, size_r =
-              let open Expr.Infix in
-              let size_chunk = Expr.int (Chunk.size chunk) in
-              (size_a / size_chunk, size_b / size_chunk)
-            in
-            Delayed.map
-              (SVArr.concat_knowing_size (AllUndef, size_r) (values, size_l))
-              (fun values -> mk (Array { chunk; values }))
-        | Zeros, Array { chunk; values } ->
-            let size_l, size_r =
-              let open Expr.Infix in
-              let size_chunk = Expr.int (Chunk.size chunk) in
-              (size_a / size_chunk, size_b / size_chunk)
-            in
-            Delayed.map
-              (SVArr.concat_knowing_size (AllZeros, size_r) (values, size_l))
-              (fun values -> mk (Array { chunk; values }))
-        | _, _ -> ret (mk (Poisoned Partially)))
-
-  let decode_bytes_to_unsigned_int ~chunk arr size =
-    let open Delayed.Syntax in
-    let open DR.Syntax in
-    let* values = SVArr.reduce arr in
-    match values with
-    | AllZeros -> DR.ok (SVal.zero_of_chunk chunk)
-    | Arr e ->
-        let two_pow_8 i = Int.shift_left 1 (8 * i) in
-        let open Expr.Infix in
-        let open Formula.Infix in
-        (* FIXME: This assumes big endian *)
-        if%sat (Expr.list_length e) #== (Expr.int size) then
-          let bytes = List.init size (fun i -> Expr.list_nth e i) in
-          let _, v =
-            List.fold_left
-              (fun (i, acc) v ->
-                (Int.pred i, (v * Expr.int (two_pow_8 i)) + acc))
-              (Int.pred size, Expr.int 0)
-              bytes
-          in
-          let learned =
-            List.filter_map
-              (function
-                | Expr.Lit Undefined -> None
-                | byte ->
-                    Some byte #>= (Expr.int 0) #&& (byte #<= (Expr.int 255)))
-              bytes
-          in
-          let v = SVal.of_expr v in
-          DR.ok ~learned v
-        else
-          let+ ret = SVal.any_of_chunk chunk in
-          Ok ret
-    | AllUndef -> DR.error LoadingPoison
+        | Poisoned _, _ | _, Poisoned _ -> ret (mk (Poisoned Partially))
+        | Single sv, Zeros ->
+            if SVal.sure_is_zero sv then zeros
+            else
+              let chunk = SVal.leak_chunk sv in
+              let chunk_size = Expr.int (Chunk.size chunk) in
+              let zeros_can_be_converted_to_same_chunk =
+                let open Formula.Infix in
+                (Expr.imod size_right chunk_size) #== Expr.zero_i
+              in
+              if%ent zeros_can_be_converted_to_same_chunk then
+                let+ zero_array =
+                  SVArr.make_zeros
+                    ~size:Expr.Infix.(size_right / chunk_size)
+                    ~chunk
+                in
+                let result =
+                  SVArr.cons_same_chunk sv zero_array |> Option.get
+                  (* Option.get is always safe here *)
+                in
+                mk (Array result)
+              else
+                let* byte_zeros = SVArr.make_zeros ~size:size_left ~chunk:U8 in
+                let+ byte_sv = SVArr.byte_array_of_sval sv in
+                let result =
+                  SVArr.concat_same_chunk byte_sv byte_zeros |> Option.get
+                  (* Option.get is always safe here *)
+                in
+                mk (Array result)
+        | Zeros, Single sv ->
+            if SVal.sure_is_zero sv then zeros
+            else
+              let chunk = SVal.leak_chunk sv in
+              let chunk_size = Expr.int (Chunk.size chunk) in
+              let zeros_can_be_converted_to_same_chunk =
+                let open Formula.Infix in
+                (Expr.imod size_left chunk_size) #== Expr.zero_i
+              in
+              if%ent zeros_can_be_converted_to_same_chunk then
+                let+ zero_array =
+                  SVArr.make_zeros
+                    ~size:Expr.Infix.(size_left / chunk_size)
+                    ~chunk
+                in
+                let result =
+                  SVArr.append_same_chunk zero_array sv |> Option.get
+                in
+                (* Garanteed to work *)
+                mk (Array result)
+              else
+                let* byte_zeros = SVArr.make_zeros ~size:size_left ~chunk:U8 in
+                let+ byte_sv = SVArr.byte_array_of_sval sv in
+                let result =
+                  SVArr.concat_same_chunk byte_zeros byte_sv |> Option.get
+                in
+                (* Garanteed to work *)
+                mk (Array result)
+        | (Array arr, Zeros | Zeros, Array arr) when SVArr.sure_is_all_zeros arr
+          -> zeros
+        | Zeros, Array arr ->
+            if SVArr.sure_is_all_zeros arr then zeros
+            else
+              let chunk = SVArr.leak_chunk arr in
+              let chunk_size = Expr.int (Chunk.size chunk) in
+              let zeros_can_be_converted_to_same_chunk =
+                let open Formula.Infix in
+                (Expr.imod size_left chunk_size) #== Expr.zero_i
+              in
+              if%ent zeros_can_be_converted_to_same_chunk then
+                let+ zero_array =
+                  SVArr.make_zeros
+                    ~size:Expr.Infix.(size_left / chunk_size)
+                    ~chunk
+                in
+                let result =
+                  SVArr.concat_same_chunk zero_array arr |> Option.get
+                in
+                (* Garanteed to work *)
+                mk (Array result)
+              else ret (mk LazyValue)
+        | Array arr, Zeros ->
+            if SVArr.sure_is_all_zeros arr then zeros
+            else
+              let chunk = SVArr.leak_chunk arr in
+              let chunk_size = Expr.int (Chunk.size chunk) in
+              let zeros_can_be_converted_to_same_chunk =
+                let open Formula.Infix in
+                (Expr.imod size_right chunk_size) #== Expr.zero_i
+              in
+              if%ent zeros_can_be_converted_to_same_chunk then
+                let+ zero_array =
+                  SVArr.make_zeros
+                    ~size:Expr.Infix.(size_right / chunk_size)
+                    ~chunk
+                in
+                let result =
+                  SVArr.concat_same_chunk arr zero_array |> Option.get
+                in
+                (* Garanteed to work *)
+                mk (Array result)
+              else ret (mk LazyValue)
+        | LazyValue, _ | _, LazyValue -> lazy_value
+        | Single sva, Single svb -> (
+            match SVArr.of_two_svals_same_chunk sva svb with
+            | Some arr -> array arr
+            | None -> lazy_value)
+        | Single sv, Array arr -> (
+            match SVArr.cons_same_chunk sv arr with
+            | Some arr -> array arr
+            | None -> lazy_value)
+        | Array arr, Single sv -> (
+            match SVArr.append_same_chunk arr sv with
+            | Some arr -> array arr
+            | None -> lazy_value)
+        | Array arra, Array arrb -> (
+            match SVArr.concat_same_chunk arra arrb with
+            | Some arr -> array arr
+            | None -> lazy_value))
 
   let decode ~chunk t =
     let open Delayed.Syntax in
     let open DR.Syntax in
     match t with
     | NotOwned _ -> DR.error MissingResource
+    | MemVal { mem_val = Poisoned _; exact_perm; _ } -> DR.error LoadingPoison
     | MemVal { mem_val = Zeros; exact_perm; _ } ->
         DR.ok (SVal.zero_of_chunk chunk, exact_perm)
-    | MemVal { mem_val = Poisoned _; exact_perm; _ } -> DR.error LoadingPoison
-    | MemVal { mem_val = Single { chunk = m_chunk; value }; exact_perm; _ } ->
-        if Chunk.equal m_chunk chunk then DR.ok (value, exact_perm)
-        else
-          let+ ret = SVal.any_of_chunk chunk in
-          Ok (ret, exact_perm)
-    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
-      when Chunk.equal chunk U16 ->
-        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 2 in
-        (decoded, exact_perm)
-    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
-      when Chunk.equal chunk U32 ->
-        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 4 in
-        (decoded, exact_perm)
-    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
-      when Chunk.equal chunk U32 ->
-        let++ decoded = decode_bytes_to_unsigned_int ~chunk values 8 in
-        (decoded, exact_perm)
-    | MemVal { mem_val = Array { chunk = chunk_b; values }; exact_perm; _ }
-      when Chunk.equal chunk chunk_b -> (
-        let* values = SVArr.reduce values in
-        match values with
-        | AllZeros -> DR.ok (SVal.zero_of_chunk chunk, exact_perm)
-        | Arr (EList [ a ]) ->
-            let sval = SVal.of_expr a in
-            DR.ok (sval, exact_perm)
-        | AllUndef -> DR.error LoadingPoison
-        | Arr l ->
-            let+ () =
-              let open Formula.Infix in
-              Delayed.assert_
-                (Expr.list_length l) #== (Expr.int 1)
-                (Failure "Not an array")
-            in
-            let sval = SVal.of_expr (Expr.list_nth l 0) in
-            Ok (sval, exact_perm))
-    | MemVal { mem_val = Array { chunk = _; _ }; exact_perm; _ } ->
-        let+ ret = SVal.any_of_chunk chunk in
-        Ok (ret, exact_perm)
+    | MemVal { mem_val = Single sval; exact_perm; _ } ->
+        let+ sval = SVal.reencode ~chunk sval in
+        Ok (sval, exact_perm)
+    | MemVal { mem_val = Array arr; exact_perm; _ } ->
+        let+ sval = SVArr.decode_as_sval ~chunk arr in
+        Ok (sval, exact_perm)
+    | MemVal { mem_val = LazyValue; exact_perm; _ } ->
+        failwith "unimplmented: decoding lazy value"
 
-  let decode_arr ~size ~chunk t =
+  let decode_array ~size ~chunk t =
     let open Delayed.Syntax in
     let open DR.Syntax in
-    let split_array_in ~size ~amount arr =
-      match arr with
-      | SVArr.AllUndef -> List.init amount (fun _ -> SVArr.AllUndef)
-      | AllZeros -> List.init amount (fun _ -> SVArr.AllZeros)
-      | Arr e ->
-          let i f = Expr.int f in
-          List.init amount (fun k ->
-              let values =
-                Expr.list_sub ~lst:e ~start:(i (k * size)) ~size:(i size)
-              in
-              SVArr.Arr values)
-    in
-    let decode_several_unsigned_ints_of_bytes ~amount ~chunk arr =
-      let arrs = split_array_in ~size:(Chunk.size chunk) ~amount arr in
-      let size = Chunk.size chunk in
-      let rec get_values = function
-        | [] -> Fmt.failwith "EMPTY ARRAY ??"
-        | [ one_value ] ->
-            let++ that_value =
-              decode_bytes_to_unsigned_int ~chunk one_value size
-            in
-            SVArr.singleton that_value
-        | a :: r ->
-            let** that_value = decode_bytes_to_unsigned_int ~chunk a size in
-            let++ rest = get_values r in
-            Option.get @@ SVArr.array_cons that_value rest
-      in
-      get_values arrs
-    in
     match t with
     | NotOwned _ -> DR.error MissingResource
+    | MemVal { mem_val = Poisoned _; exact_perm; _ } -> DR.error LoadingPoison
     | MemVal { mem_val = Zeros; exact_perm; _ } ->
-        DR.ok (SVArr.AllZeros, exact_perm)
-    | MemVal { mem_val = Poisoned _; exact_perm; _ } ->
-        DR.ok (SVArr.AllUndef, exact_perm)
-    | MemVal { mem_val = Single { chunk = m_chunk; value }; exact_perm; _ } ->
-        DR.ok
-          (if Chunk.equal m_chunk chunk then (SVArr.singleton value, exact_perm)
-          else (AllUndef, exact_perm))
-    | MemVal { mem_val = Array { chunk = U8; values }; exact_perm; _ }
-      when Chunk.equal chunk U64 -> (
-        match size with
-        | Expr.Lit (Int amount) ->
-            let amount = Z.to_int amount in
-            let++ arr =
-              decode_several_unsigned_ints_of_bytes ~amount ~chunk values
-            in
-            (arr, exact_perm)
-        | _ -> DR.ok (SVArr.AllUndef, exact_perm))
-    | MemVal { mem_val = Array { chunk = m_chunk; values }; exact_perm; _ }
-      when Chunk.equal m_chunk chunk ->
-        let* () = SVArr.learn_chunk ~chunk ~size values in
-        DR.ok (values, exact_perm)
-    | MemVal { mem_val = Array _; exact_perm; _ } ->
-        DR.ok (SVArr.AllUndef, exact_perm)
+        let+ arr = SVArr.make_zeros ~chunk ~size in
+        Ok (arr, exact_perm)
+    | MemVal { mem_val = Single sval; exact_perm; _ } ->
+        let+ arr = SVArr.decode_sval_into ~chunk sval in
+        Ok (arr, exact_perm)
+    | MemVal { mem_val = Array svarr; exact_perm; _ } ->
+        let+ arr = SVArr.reencode ~chunk svarr in
+        Ok (arr, exact_perm)
+    | MemVal { mem_val = LazyValue; _ } ->
+        failwith "unimplmented: decoding lazy value"
 
-  let encode ~(perm : Perm.t) ~chunk (sval : SVal.t) : t =
-    let mem_val = Single { chunk; value = sval } in
+  let single ~(perm : Perm.t) ~chunk (sval : SVal.t) : t =
+    let mem_val = Single sval in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
-  let encode_arr ~(perm : Perm.t) ~(chunk : Chunk.t) (sarr : SVArr.t) =
-    let mem_val = Array { chunk; values = sarr } in
+  let array ~(perm : Perm.t) ~(chunk : Chunk.t) (sarr : SVArr.t) =
+    let mem_val = Array sarr in
     MemVal { exact_perm = Some perm; min_perm = perm; mem_val }
 
   let lvars = function
-    | MemVal { mem_val = Single { value = e; _ }; _ } -> SVal.lvars e
+    | MemVal { mem_val = Single sval; _ } -> SVal.lvars sval
+    | MemVal { mem_val = Array sarr; _ } -> SVArr.lvars sarr
     | _ -> SS.empty
 
   let alocs = function
-    | MemVal { mem_val = Single { value = e; _ }; _ } -> SVal.alocs e
-    | MemVal { mem_val = Array { values = Arr e; _ }; _ } -> Expr.alocs e
+    | MemVal { mem_val = Single sval; _ } -> SVal.alocs sval
+    | MemVal { mem_val = Array svarr; _ } -> SVArr.alocs svarr
     | _ -> SS.empty
 
   let substitution ~sval_subst ~svarr_subst n =
     let smv = function
-      | Single s -> Single { s with value = sval_subst s.value }
-      | Array a -> Array { a with values = svarr_subst a.values }
+      | Single s -> Single (sval_subst s)
+      | Array a -> Array (svarr_subst a)
       | u -> u
     in
     match n with
@@ -612,7 +529,7 @@ module Tree = struct
     in
     let children =
       match node with
-      | NotOwned Totally
+      | Node.NotOwned Totally
       | MemVal { exact_perm = Some _; mem_val = Zeros | Poisoned Totally; _ } ->
           None
       | _ -> Some (left, right)
@@ -631,12 +548,12 @@ module Tree = struct
 
   let sval_leaf ~low ~perm ~value ~chunk =
     let open Delayed.Syntax in
-    let node = Node.encode ~perm ~chunk value in
+    let node = Node.single ~perm ~chunk value in
     let span = Range.of_low_and_chunk low chunk in
     make ~node ~span ()
 
   let sarr_leaf ~low ~perm ~size ~array ~chunk =
-    let node = Node.encode_arr ~perm ~chunk array in
+    let node = Node.array ~perm ~chunk array in
     let span = Range.of_low_chunk_and_size low chunk size in
     make ~node ~span ()
 
@@ -667,33 +584,33 @@ module Tree = struct
       ol #== nl
     then
       let at = nh in
-      let left_node, right_node = Node.split ~span:old_span ~at t.node in
+      let+ left_node, right_node = Node.split ~span:old_span ~at t.node in
       let left_span, right_span = Range.split_at old_span at in
       let left = make ~node:left_node ~span:left_span () in
       let right = make ~node:right_node ~span:right_span () in
-      Delayed.return (left_node, left, right)
+      (left_node, left, right)
     else
       if%sat
         log_string "oh #== nh";
         oh #== nh
       then
         let at = nl in
-        let left_node, right_node = Node.split ~span:old_span ~at t.node in
+        let+ left_node, right_node = Node.split ~span:old_span ~at t.node in
         let left_span, right_span = Range.split_at old_span nl in
         let left = make ~node:left_node ~span:left_span () in
         let right = make ~node:right_node ~span:right_span () in
-        Delayed.return (right_node, left, right)
+        (right_node, left, right)
       else
         (* We're first splitting on the left then splitting again on the right *)
-        let left_node, right_node = Node.split ~span:old_span ~at:nl t.node in
+        let* left_node, right_node = Node.split ~span:old_span ~at:nl t.node in
         let left_span, right_span = Range.split_at old_span nl in
         let left = make ~node:left_node ~span:left_span () in
         let full_right = make ~node:right_node ~span:right_span () in
         let* node, right_left, right_right = split ~range full_right in
-        let* right =
+        let+ right =
           with_children full_right ~left:right_left ~right:right_right
         in
-        Delayed.return (node, left, right)
+        (node, left, right)
 
   let extend_if_needed t range =
     let open Formula.Infix in
@@ -914,7 +831,7 @@ module Tree = struct
     let rebuild_parent = with_children in
     let range = Range.of_low_chunk_and_size low chunk size in
     let** framed, tree = frame_range t ~replace_node ~rebuild_parent range in
-    let+* arr, perm = Node.decode_arr ~size ~chunk framed.node in
+    let+* arr, perm = Node.decode_array ~size ~chunk framed.node in
     Ok (arr, perm, tree)
 
   let set_array
@@ -929,9 +846,9 @@ module Tree = struct
     let replace_node _ = DR.ok (sarr_leaf ~low ~chunk ~array ~size ~perm) in
     let rebuild_parent = of_children in
     let range = Range.of_low_chunk_and_size low chunk size in
-    let** _, t = frame_range t ~replace_node ~rebuild_parent range in
-    let+ () = SVArr.learn_chunk ~chunk ~size array in
-    Ok t
+    let++ _, t = frame_range t ~replace_node ~rebuild_parent range in
+    (* let+ () = SVArr.learn_chunk ~chunk ~size array in *)
+    t
 
   let get_single (t : t) (low : Expr.t) (chunk : Chunk.t) :
       (SVal.t * Perm.t option * t, err) DR.t =
@@ -1109,32 +1026,26 @@ module Tree = struct
     let low, high = span in
     match node with
     | NotOwned Totally -> []
-    | NotOwned Partially | MemVal { mem_val = Poisoned Partially; _ } ->
+    | NotOwned Partially
+    | MemVal { mem_val = Poisoned Partially; _ }
+    | MemVal { mem_val = LazyValue; _ } ->
         let left, right = Option.get children in
         assertions ~loc left @ assertions ~loc right
     | MemVal { mem_val = Poisoned Totally; exact_perm = perm; _ } ->
         [ CoreP.hole ~loc ~low ~high ~perm ]
     | MemVal { mem_val = Zeros; exact_perm = perm; _ } ->
         [ CoreP.zeros ~loc ~low ~high ~perm ]
-    | MemVal { mem_val = Single { chunk; value }; exact_perm = perm; _ } ->
-        let sval = SVal.to_gil_expr value in
+    | MemVal { mem_val = Single sval; exact_perm = perm; _ } ->
+        let chunk, sval = SVal.leak sval in
         [ CoreP.single ~loc ~ofs:low ~chunk ~sval ~perm ]
-    | MemVal { mem_val = Array { chunk; values }; exact_perm = perm; _ } -> (
+    | MemVal { mem_val = Array sarr; exact_perm = perm; _ } ->
+        let chunk, sval_arr = SVArr.leak sarr in
         let chksize = Expr.int (Chunk.size chunk) in
         let total_size =
           let open Expr.Infix in
           (high - low) / chksize
         in
-        match values with
-        | AllUndef -> [ CoreP.hole ~loc ~low ~high ~perm ]
-        | AllZeros -> [ CoreP.zeros ~loc ~low ~high ~perm ]
-        | array ->
-            let e, learned =
-              SVArr.to_gil_expr_undelayed ~range:span array ~chunk
-            in
-            let learned = List.map (fun x -> Asrt.Pure x) learned in
-            CoreP.array ~loc ~ofs:low ~perm ~chunk ~size:total_size ~sval_arr:e
-            :: learned)
+        [ CoreP.array ~loc ~ofs:low ~perm ~chunk ~size:total_size ~sval_arr ]
 
   let rec substitution
       ~svarr_subst
@@ -1397,7 +1308,7 @@ let get_simple_mem_val ~expected_mem_val t low high =
         let res =
           match node with
           | MemVal { mem_val; exact_perm = perm; _ }
-            when Node.eq_mem_val mem_val expected_mem_val -> Ok perm
+            when expected_mem_val mem_val -> Ok perm
           | NotOwned _ -> Error MissingResource
           | _ -> Error WrongMemVal
         in
@@ -1423,9 +1334,18 @@ let set_simple_mem_val ~mem_val t low high perm =
   in
   DR.of_result ~learned (with_root t root_set)
 
-let get_hole = get_simple_mem_val ~expected_mem_val:(Poisoned Totally)
+let get_hole =
+  get_simple_mem_val ~expected_mem_val:(function
+    | Poisoned Totally -> true
+    | _ -> false)
+
 let set_hole = set_simple_mem_val ~mem_val:(Poisoned Totally)
-let get_zeros = get_simple_mem_val ~expected_mem_val:Zeros
+
+let get_zeros =
+  get_simple_mem_val ~expected_mem_val:(function
+    | Zeros -> true
+    | _ -> false)
+
 let set_zeros = set_simple_mem_val ~mem_val:Zeros
 
 let get_freed t =

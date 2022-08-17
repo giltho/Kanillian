@@ -1,4 +1,5 @@
 module GUtils = Gillian.Utils
+open GUtils.Prelude
 module Result = Stdlib.Result
 open Gillian.Monadic
 module DR = Delayed_result
@@ -7,7 +8,7 @@ open Delayed.Syntax
 open Gillian.Symbolic
 open Gillian.Gil_syntax
 module Logging = Gillian.Logging
-module SS = GUtils.Containers.SS
+open SVal
 module GEnv = GEnv.Symbolic
 
 (* Some utils first *)
@@ -36,18 +37,16 @@ type st = Subst.t
 
 type err_t =
   | InvalidLocation of Expr.t
+  | NonPositiveArraySize of Expr.t
   | MissingLocResource of string
   | SHeapTreeErr of {
       at_locations : string list;
       sheaptree_err : SHeapTree.err;
     }
   | GEnvErr of GEnv.err_t
-  | Not_a_C_value of Expr.t
 
 let lift_sheaptree_err loc (err : SHeapTree.err) =
-  match err with
-  | Not_a_C_value e -> Not_a_C_value e
-  | _ -> SHeapTreeErr { at_locations = [ loc ]; sheaptree_err = err }
+  SHeapTreeErr { at_locations = [ loc ]; sheaptree_err = err }
 
 let lift_genv_res r = Result.map_error (fun e -> GEnvErr e) r
 
@@ -216,8 +215,7 @@ module Mem = struct
     let** loc_name = resolve_loc_result loc in
     let last_op = LastOp.GetArray (loc_name, ofs, size, chunk) in
     let open Formula.Infix in
-    if%sat size #<= (Expr.int 0) then
-      DR.ok (make ~last_op map, loc_name, SVal.SVArray.empty, Some Perm.Freeable)
+    if%sat size #<= (Expr.int 0) then DR.error (NonPositiveArraySize size)
     else
       let** tree = get_tree_res map loc_name in
       let++ sarr, perm, new_tree =
@@ -442,7 +440,7 @@ module Mem = struct
       in
       let le_subst = Subst.subst_in_expr subst ~partial:true in
       let sval_subst = SVal.substitution ~le_subst in
-      let svarr_subst = SVal.SVArray.subst ~le_subst in
+      let svarr_subst = SVArray.subst ~le_subst in
       let subst_tree =
         SHeapTree.substitution ~le_subst ~sval_subst ~svarr_subst
       in
@@ -581,7 +579,7 @@ let execute_store heap params =
   match params with
   | [ Expr.Lit (String chunk_name); loc; ofs; value ] ->
       let chunk = Chunk.of_string chunk_name in
-      let sval = SVal.of_expr value in
+      let sval = SVal.make ~value ~chunk in
       let++ mem = Mem.store heap.mem loc chunk ofs sval in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "store" params
@@ -592,7 +590,7 @@ let execute_load heap params =
   | [ Expr.Lit (String chunk_name); loc; ofs ] ->
       let chunk = Chunk.of_string chunk_name in
       let** value, mem = Mem.load heap.mem loc chunk ofs in
-      let gil_value = SVal.to_gil_expr value in
+      let gil_value = SVal.to_gil_expr ~chunk value in
       DR.ok (make_branch ~heap:{ heap with mem } ~rets:[ gil_value ] ())
   | _ -> fail_ungracefully "store" params
 
@@ -635,7 +633,7 @@ let execute_get_single heap params =
       let chunk = Chunk.of_string chunk_string in
       let** mem, loc_name, sval, perm = Mem.get_single heap.mem loc ofs chunk in
       let loc_e = expr_of_loc_name loc_name in
-      let sval_e = SVal.to_gil_expr sval in
+      let sval_e = SVal.to_gil_expr ~chunk sval in
       let perm_string = Perm.opt_to_string perm in
       DR.ok
         (make_branch ~heap:{ heap with mem }
@@ -657,12 +655,12 @@ let execute_set_single heap params =
    loc;
    ofs;
    Expr.Lit (String chunk_string);
-   sval_e;
+   value;
    Expr.Lit (String perm_string);
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let sval = SVal.of_expr sval_e in
+      let sval = SVal.make ~chunk ~value in
       let++ mem = Mem.set_single heap.mem loc ofs chunk sval perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params
@@ -685,8 +683,7 @@ let execute_get_array heap params =
         Mem.get_array heap.mem loc ofs size chunk
       in
       let loc_e = expr_of_loc_name loc_name in
-      let range = SHeapTree.Range.of_low_chunk_and_size ofs chunk size in
-      let* array_e = SVal.SVArray.to_gil_expr ~chunk ~range array in
+      let array_e = SVArray.to_gil_expr ~chunk ~size array in
       let perm_string = Perm.opt_to_string perm in
       DR.ok
         (make_branch ~heap:{ heap with mem }
@@ -710,12 +707,12 @@ let execute_set_array heap params =
    ofs;
    size;
    Expr.Lit (String chunk_string);
-   arr_e;
+   values;
    Expr.Lit (String perm_string);
   ] ->
       let perm = Perm.of_string perm_string in
       let chunk = Chunk.of_string chunk_string in
-      let arr = SVal.SVArray.of_gil_expr_exn arr_e in
+      let arr = SVArray.make ~chunk ~values in
       let++ mem = Mem.set_array heap.mem loc ofs size chunk arr perm in
       make_branch ~heap:{ heap with mem } ~rets:[] ()
   | _ -> fail_ungracefully "set_single" params
@@ -906,7 +903,8 @@ let pp_err fmt (e : err_t) =
           | l -> Fmt.pf fmt "s %a" (Fmt.Dump.list Fmt.string) l)
         at_locations SHeapTree.pp_err sheaptree_err
   | GEnvErr (Symbol_not_found s) -> Fmt.pf fmt "Symbol not found: %s" s
-  | Not_a_C_value v -> Fmt.pf fmt "Not a C value: %a" Expr.pp v
+  | NonPositiveArraySize vt ->
+      Fmt.pf fmt "Array sizes should be strictly positive: %a" Expr.pp vt
 
 (* let str_of_err e = Format.asprintf "%a" pp_err e *)
 
@@ -1091,7 +1089,7 @@ let get_recovery_vals _ = function
   | SHeapTreeErr { at_locations; _ } ->
       List.map Expr.loc_from_loc_name at_locations
   | GEnvErr (Symbol_not_found s) -> [ Expr.string s ]
-  | Not_a_C_value e -> [ e ]
+  | NonPositiveArraySize e -> [ e ]
 
 let get_failing_constraint _e = failwith "Not ready for bi-abduction yet"
 

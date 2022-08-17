@@ -1,6 +1,10 @@
 type t = U8 | U16 | U32 | U64 | U128 | I8 | I16 | I32 | I64 | I128 | F32 | F64
 [@@deriving eq, yojson]
 
+type components =
+  | Float of { bit_width : int }
+  | Int of { bit_width : int; signed : bool }
+
 let to_string = function
   | U8 -> "u8"
   | U16 -> "u16"
@@ -72,3 +76,36 @@ let of_int_type ~signed ~size =
   | 128, true -> Some I128
   | 128, false -> Some U128
   | _ -> None
+
+let to_components chunk =
+  match chunk with
+  | U8 -> Int { bit_width = 8; signed = false }
+  | U16 -> Int { bit_width = 16; signed = false }
+  | U32 -> Int { bit_width = 32; signed = false }
+  | U64 -> Int { bit_width = 64; signed = false }
+  | U128 -> Int { bit_width = 128; signed = false }
+  | I8 -> Int { bit_width = 8; signed = true }
+  | I16 -> Int { bit_width = 16; signed = true }
+  | I32 -> Int { bit_width = 32; signed = true }
+  | I64 -> Int { bit_width = 64; signed = true }
+  | I128 -> Int { bit_width = 128; signed = true }
+  | F32 -> Float { bit_width = 32 }
+  | F64 -> Float { bit_width = 64 }
+
+let int_chunk_to_signed_and_size chunk =
+  match chunk with
+  | U8 -> (false, 1)
+  | U16 -> (false, 2)
+  | U32 -> (false, 4)
+  | U64 -> (false, 8)
+  | U128 -> (false, 16)
+  | I8 -> (true, 1)
+  | I16 -> (true, 2)
+  | I32 -> (true, 4)
+  | I64 -> (true, 8)
+  | I128 -> (true, 16)
+  | F32 | F64 -> failwith "int_chunk_to_signed_and_size: not an int chunk"
+
+let is_int = function
+  | U8 | U16 | U32 | U64 | U128 | I8 | I16 | I32 | I64 | I128 -> true
+  | F32 | F64 -> false

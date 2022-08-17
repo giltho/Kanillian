@@ -30,3 +30,23 @@ let z_of_hex s =
       ret := Z.add (Z.shift_left !ret 4) (Z.of_int to_add))
     s;
   !ret
+
+let batch_list ~batch_size l =
+  if batch_size <= 0 then
+    raise (Invalid_argument "batch_list: negative argument");
+  let rec split_at ~acc i l =
+    if i <= 0 then (List.rev acc, l)
+    else
+      match l with
+      | [] -> (List.rev acc, [])
+      | x :: l -> split_at (i - 1) ~acc:(x :: acc) l
+  in
+  let split_at i l = split_at ~acc:[] i l in
+  let rec aux of_length acc l =
+    match l with
+    | [] -> List.rev acc
+    | _ :: _ ->
+        let sublist, l = split_at batch_size l in
+        aux of_length (sublist :: acc) l
+  in
+  aux batch_size [] l

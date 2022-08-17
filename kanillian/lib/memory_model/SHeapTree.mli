@@ -1,6 +1,7 @@
 open Gil_syntax
 open Utils.Containers
 open Monadic
+open SVal
 
 type err =
   | UseAfterFree
@@ -13,7 +14,6 @@ type err =
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison
-  | Not_a_C_value of Gil_syntax.Expr.t
 
 val pp_err : err Fmt.t
 val err_equal : err -> err -> bool
@@ -47,14 +47,10 @@ val set_single : t -> Expr.t -> Chunk.t -> SVal.t -> Perm.t -> t d_or_error
 val rem_last_get : t -> t
 
 val get_array :
-  t ->
-  Expr.t ->
-  Expr.t ->
-  Chunk.t ->
-  (SVal.SVArray.t * Perm.t option * t) d_or_error
+  t -> Expr.t -> Expr.t -> Chunk.t -> (SVArray.t * Perm.t option * t) d_or_error
 
 val set_array :
-  t -> Expr.t -> Expr.t -> Chunk.t -> SVal.SVArray.t -> Perm.t -> t d_or_error
+  t -> Expr.t -> Expr.t -> Chunk.t -> SVArray.t -> Perm.t -> t d_or_error
 
 val get_hole : t -> Expr.t -> Expr.t -> (t * Perm.t option) d_or_error
 val set_hole : t -> Expr.t -> Expr.t -> Perm.t -> t d_or_error
@@ -81,7 +77,7 @@ val assertions : loc:string -> t -> Asrt.t list
 val substitution :
   le_subst:(Expr.t -> Expr.t) ->
   sval_subst:(SVal.t -> SVal.t) ->
-  svarr_subst:(SVal.SVArray.t -> SVal.SVArray.t) ->
+  svarr_subst:(SVArray.t -> SVArray.t) ->
   t ->
   t
 
