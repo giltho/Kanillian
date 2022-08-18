@@ -1066,7 +1066,8 @@ module Tree = struct
   let box t =
     let rec flatten_tree { node; span; children; _ } =
       match node with
-      | NotOwned Partially | MemVal { mem_val = Poisoned Partially; _ } ->
+      | NotOwned Partially
+      | MemVal { mem_val = Poisoned Partially | LazyValue; _ } ->
           let left, right = Option.get children in
           flatten_tree left @ flatten_tree right
       | node -> [ (span, node) ]

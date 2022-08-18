@@ -116,7 +116,9 @@ let make ~machine ~prog ~harness () =
     break_lab = None;
   }
 
-let with_new_generators t = { t with fresh_v = Generators.temp_var () }
+let with_new_generators t =
+  { t with fresh_v = Generators.temp_var (); fresh_lab = Generators.label () }
+
 let fresh_v t = t.fresh_v ()
 let fresh_lab t = t.fresh_lab ()
 let in_memory t x = Hashset.mem t.in_memory x

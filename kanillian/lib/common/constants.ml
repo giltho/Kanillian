@@ -3,6 +3,8 @@ module Internal_functions = struct
   let calloc = "i__calloc"
   let memmove = "i__memmove"
   let memcpy = "i__memcpy"
+  let memset = "i__memset"
+  let memcmp = "i__memcmp"
   let store_zeros = "i__store_zeros"
   let loadv = "i__loadv"
   let storev = "i__storev"
@@ -24,6 +26,8 @@ module Internal_functions = struct
     | "calloc" -> Some calloc
     | "memmove" -> Some memmove
     | "memcpy" -> Some memcpy
+    | "memset" -> Some memset
+    | "memcmp" -> Some memcmp
     | "__rust_alloc" -> Some Rust.rust_alloc
     | "__rust_alloc_zeroed" -> Some Rust.rust_alloc_zeroed
     | "__rust_dealloc" -> Some Rust.rust_dealloc
