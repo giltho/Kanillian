@@ -97,6 +97,12 @@ let all_imports =
       genv_config = any_genv_config;
     };
     {
+      file = "rust_allocation_internals.gil";
+      arch = any_arch;
+      exec = all_exec;
+      genv_config = any_genv_config;
+    };
+    {
       file = "string.gil";
       arch = any_arch;
       exec = all_exec;

@@ -14,6 +14,7 @@ proc i__free(ptr) {
          chunk := "i__ptr_chunk"();
          ptr_sz := "i__ptr_size"();
          sz := [mem_load](chunk, l-nth(ptr, 0i), l-nth(ptr, 1i) i- ptr_sz);
+         sz := l-nth(sz, 0i);
          goto [ sz i< 0i ] die ctn;
    die:  fail[free]("Deallocating a pointer of negative size");
    ctn:  u := [mem_free](l-nth(ptr, 0i), l-nth(ptr, 1i) i- ptr_sz, l-nth(ptr, 1i) i+ sz);

@@ -12,11 +12,22 @@ module Internal_functions = struct
   let bool_of_val = "i__bool_of_value"
   let glob_set_fun = "i__glob_set_fun"
 
+  module Rust = struct
+    let rust_alloc = "i__rust_alloc"
+    let rust_alloc_zeroed = "i__rust_alloc_zeroed"
+    let rust_dealloc = "i__rust_dealloc"
+    let rust_realloc = "i__rust_realloc"
+  end
+
   let hook = function
     | "malloc" -> Some malloc
     | "calloc" -> Some calloc
     | "memmove" -> Some memmove
     | "memcpy" -> Some memcpy
+    | "__rust_alloc" -> Some Rust.rust_alloc
+    | "__rust_alloc_zeroed" -> Some Rust.rust_alloc_zeroed
+    | "__rust_dealloc" -> Some Rust.rust_dealloc
+    | "__rust_realloc" -> Some Rust.rust_realloc
     | _ -> None
 end
 

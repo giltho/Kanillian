@@ -45,11 +45,16 @@ let is_cbmc_specific = function
   | "__CPROVER_architecture_single_width" -> true
   | _ -> false
 
+let is_kani_specific = function
+  | "__rust_alloc" | "__rust_dealloc" | "__rust_realloc" | "__rust_alloc_zeroed"
+    -> true
+  | _ -> false
+
 let sanitize_symbol s =
   match s with
   | "" -> "i__empty"
   | _ -> (
-      if is_cbmc_specific s then s
+      if is_cbmc_specific s || is_kani_specific s then s
       else
         let replaced = Str.global_replace (Str.regexp {|[:\.\$]|}) "_" s in
         match String.get replaced 0 with
