@@ -447,6 +447,9 @@ type t =
   | OverflowMinus
   | OverflowMult
   | OverflowUnaryMinus
+  | OverflowResultPlus
+  | OverflowResultMinus
+  | OverflowResultMult
   | ObjectDescriptor
   | IsDynamicObject
   | DynamicObject
@@ -1253,6 +1256,9 @@ let of_string str =
   | "overflow--" -> OverflowMinus
   | "overflow-*" -> OverflowMult
   | "overflow-unary-" -> OverflowUnaryMinus
+  | "overflow_result-+" -> OverflowResultPlus
+  | "overflow_result--" -> OverflowResultMinus
+  | "overflow_result-*" -> OverflowResultMult
   | "object_descriptor" -> ObjectDescriptor
   | "is_dynamic_object" -> IsDynamicObject
   | "dynamic_object" -> DynamicObject
@@ -2062,6 +2068,9 @@ let to_string str =
   | CZeroInitializer -> "#zero_initializer"
   | Body -> "body"
   | TemporaryObject -> "temporary_object"
+  | OverflowResultPlus -> "overflow_result-+"
+  | OverflowResultMinus -> "overflow_result--"
+  | OverflowResultMult -> "overflow_result-*"
   | OverflowPlus -> "overflow-+"
   | OverflowMinus -> "overflow--"
   | OverflowMult -> "overflow-*"

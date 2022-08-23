@@ -107,4 +107,5 @@ let is_zst ~prog ~machine (ty : Type.t) : bool =
   | Bool | Code _ | Constructor -> false
   | _ ->
       let tag_lookup = Hashtbl.find prog.types in
-      Type.bit_size_of ~machine ~tag_lookup ty == 0
+      (not (Type.Overflow_result.is_overflow_result ~tag_lookup ty))
+      && Type.bit_size_of ~machine ~tag_lookup ty == 0

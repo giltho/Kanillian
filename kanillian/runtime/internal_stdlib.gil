@@ -33,11 +33,14 @@ proc i__memcpy(ptr1, ptr2, sz) {
 };
 
 proc i__memcmp(ptr1, ptr2, sz) {
-      (* It could be worth reimplementing this as a memory action *)
-      left := [mem_getArray](l-nth(ptr1, 0i), l-nth(ptr1, 1i), sz, "u8");
-      right := [mem_getArray](l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz, "u8");
-      ret := "i__value_of_bool"(left = right);
-      return
+      (* FIXME: This is invalid in C, but valid for the Kani use cases (only check equality to 0) *)
+           goto [sz i<= 0i] zer cmp;
+      zer: ret := 0i;
+           return;
+      cmp: left := [mem_getArray](l-nth(ptr1, 0i), l-nth(ptr1, 1i), sz, "u8");
+           right := [mem_getArray](l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz, "u8");
+           ret := "i__value_of_bool"(left = right);
+           return
 };
 
 proc i__memset(ptr, vc, n) {

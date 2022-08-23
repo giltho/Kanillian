@@ -32,6 +32,9 @@ module Ops : sig
       | Mult
       | Notequal
       | Or
+      | OverflowResultMinus
+      | OverflowResultMult
+      | OverflowResultPlus
       | OverflowMinus
       | OverflowMult
       | OverflowPlus
@@ -135,6 +138,15 @@ and Type : sig
   [@@deriving show, eq]
 
   val show_simple : t -> string
+
+  module Overflow_result : sig
+    val is_overflow_result : tag_lookup:(string -> t) -> t -> bool
+
+    type field = Result | Overflowed
+
+    val field : string -> field
+  end
+
   val size_of : machine:Machine_model.t -> tag_lookup:(string -> t) -> t -> int
 
   val offset_struct_field :
@@ -208,7 +220,7 @@ and Stmt : sig
     | SUnhandled of Id.t
 
   and switch_case = { case : Expr.t; sw_body : t }
-  and t = { stmt_location : Location.t; body : body }
+  and t = { stmt_location : Location.t; body : body; comment : string option }
 
   val pp : Format.formatter -> t -> unit
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body

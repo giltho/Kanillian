@@ -21,6 +21,9 @@ module Binary = struct
     | Mult
     | Notequal
     | Or
+    | OverflowResultMinus
+    | OverflowResultMult
+    | OverflowResultPlus
     | OverflowMinus
     | OverflowMult
     | OverflowPlus

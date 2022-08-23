@@ -159,6 +159,33 @@ and datatype_component_of_irep ~machine irep : Datatype_component.t =
 
 let type_in_irep ~machine irep = of_irep ~machine (irep $ Type)
 
+let is_integer = function
+  | CInteger _ | Signedbv _ | Unsignedbv _ -> true
+  | _ -> false
+
+module Overflow_result = struct
+  let rec is_overflow_result ~tag_lookup = function
+    | Struct
+        {
+          components =
+            [
+              Field { name = "result"; type_ };
+              Field { name = "overflowed"; type_ = Bool };
+            ];
+          _;
+        } -> is_integer type_
+    | StructTag t -> is_overflow_result ~tag_lookup (tag_lookup t)
+    | _ -> false
+
+  type field = Result | Overflowed
+
+  let field s =
+    match s with
+    | "result" -> Result
+    | "overflowed" -> Overflowed
+    | _ -> failwith "invalid field for overflow_result access"
+end
+
 (** Returns the size of a type in bits *)
 let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   let dc_bit_size = bit_size_of_datatype_component ~machine ~tag_lookup in

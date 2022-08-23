@@ -26,6 +26,10 @@ let one_representable_field ~(prog : Program.t) ~machine dt =
   in
   component_search None dt
 
+let is_overflow_result ~(prog : Program.t) (type_ : Type.t) =
+  let tag_lookup = Hashtbl.find prog.types in
+  Type.Overflow_result.is_overflow_result ~tag_lookup type_
+
 let rec representable_in_store ~prog ~machine (type_ : Type.t) =
   match type_ with
   | Bool
@@ -37,7 +41,8 @@ let rec representable_in_store ~prog ~machine (type_ : Type.t) =
   | Pointer _
   | Empty -> true
   | Struct { components; _ } ->
-      Program.is_zst ~prog ~machine type_
+      is_overflow_result ~prog type_
+      || Program.is_zst ~prog ~machine type_
       || Option.is_some (one_representable_field ~prog ~machine components)
   | StructTag tag ->
       representable_in_store ~prog ~machine (Hashtbl.find prog.types tag)
@@ -72,9 +77,15 @@ module Local = struct
         method! visit_expr_value ~ctx ~type_ (e : Expr.value) =
           match e with
           | AddressOf e | ByteExtract { e; _ } -> super#visit_expr ~ctx:true e
-          | Symbol x
-            when ctx || not (representable_in_store ~prog ~machine type_) ->
-              Hashset.add in_memory x
+          | Symbol _ when is_overflow_result ~prog type_ ->
+              if ctx then
+                Error.unexpected "need to put overflow result in memory"
+          | Symbol x ->
+              if is_overflow_result ~prog type_ then (
+                if ctx then
+                  Error.unexpected "need to put overflow result in memory")
+              else if ctx || not (representable_in_store ~prog ~machine type_)
+              then Hashset.add in_memory x
           | _ -> super#visit_expr_value ~ctx ~type_ e
 
         method! visit_stmt_body ~ctx (s : Stmt.body) =
@@ -154,10 +165,12 @@ let offset_struct_field ctx ty field =
       let machine = ctx.machine in
       Type.offset_struct_field ~tag_lookup ~machine ty field)
 
+let is_overflow_result ctx ty = is_overflow_result ~prog:ctx.prog ty
+
 let is_zst_access ctx (ty : Type.t) =
   match ty with
   | Bool | Code _ -> false
-  | _ -> size_of ctx ty == 0
+  | _ -> (not (is_overflow_result ctx ty)) && size_of ctx ty == 0
 
 let representable_in_store ctx ty =
   representable_in_store ~machine:ctx.machine ~prog:ctx.prog ty

@@ -407,5 +407,10 @@ class ['a] map =
       let new_body = self#visit_stmt_body ~ctx stmt.body in
       let new_location = self#visit_location ~ctx stmt.stmt_location in
       if new_body == stmt.body && new_location == stmt.stmt_location then stmt
-      else { body = new_body; stmt_location = new_location }
+      else
+        {
+          body = new_body;
+          stmt_location = new_location;
+          comment = stmt.comment;
+        }
   end

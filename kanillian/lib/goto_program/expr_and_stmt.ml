@@ -289,6 +289,9 @@ end = struct
     | OverflowMinus -> lift_binop OverflowMinus
     | OverflowMult -> lift_binop OverflowMult
     | OverflowPlus -> lift_binop OverflowPlus
+    | OverflowResultMinus -> lift_binop OverflowResultMinus
+    | OverflowResultMult -> lift_binop OverflowResultMult
+    | OverflowResultPlus -> lift_binop OverflowResultPlus
     | Plus -> lift_binop Plus
     | ROk -> lift_binop ROk
     | Rol -> lift_binop Rol
@@ -345,7 +348,7 @@ and Stmt : sig
     | SUnhandled of Id.t
 
   and switch_case = { case : Expr.t; sw_body : t }
-  and t = { stmt_location : Location.t; body : body }
+  and t = { stmt_location : Location.t; body : body; comment : string option }
 
   val pp : Format.formatter -> t -> unit
   val body_of_irep : machine:Machine_model.t -> Irep.t -> body
@@ -378,7 +381,7 @@ end = struct
     | SUnhandled of Id.t
 
   and switch_case = { case : Expr.t; sw_body : t }
-  and t = { stmt_location : Location.t; body : body }
+  and t = { stmt_location : Location.t; body : body; comment : string option }
 
   let unhandled ~irep:_ id =
     (* TODO: hide the following line under a config flag. *)
@@ -544,6 +547,7 @@ end = struct
               {
                 body = Block (this_body :: rest_of_case);
                 stmt_location = this_body.stmt_location;
+                comment = None;
               }
             in
             (rest, [], Some block)
@@ -557,6 +561,7 @@ end = struct
           {
             body = Block (this_body :: rest_of_case);
             stmt_location = this_body.stmt_location;
+            comment = None;
           }
         in
         ({ case; sw_body } :: cases, [], default)
@@ -568,5 +573,6 @@ end = struct
   and of_irep ~(machine : Machine_model.t) (irep : Irep.t) : t =
     let stmt_location = Location.sloc_in_irep irep in
     let body = body_of_irep ~machine irep in
-    { body; stmt_location }
+    let comment = irep $? Comment |> Option.map Irep.as_just_string in
+    { body; stmt_location; comment }
 end

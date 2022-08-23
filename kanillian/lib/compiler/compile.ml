@@ -191,7 +191,12 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
               value = Nondet;
             }
         in
-        Stmt.{ stmt_location = func.location; body = Return (Some nondet) }
+        Stmt.
+          {
+            stmt_location = func.location;
+            body = Return (Some nondet);
+            comment = None;
+          }
   in
 
   (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
@@ -241,7 +246,8 @@ let start_for_harness ~ctx (harness : Program.Func.t) =
   let cprover_start =
     let open Program.Func in
     let stmt stmt_body =
-      Stmt.{ stmt_location = harness.location; body = stmt_body }
+      Stmt.
+        { stmt_location = harness.location; body = stmt_body; comment = None }
     in
     let expr type_ expr_value =
       GExpr.{ location = harness.location; type_; value = expr_value }

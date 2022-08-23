@@ -11,9 +11,23 @@ type access =
           However, in the future, we might copy fields
           one-by-one to preserve the correct semantics of C *)
   | Direct of string
+  | ListMember of { list : string; index : int; total_size : int }
+      (** When a value is represented as a list in the store,
+          one can access or override one of the members by.
+          For now this only used for overflow result.
+          However, we could also model fat pointers like this. *)
   | DirectFunction of string
   | ZST
 [@@deriving show { with_path = false }]
+
+let write_list_member ~list ~index ~total_size e =
+  let list_e = Expr.PVar list in
+  let values =
+    List.init total_size (fun i ->
+        if index == i then e else Expr.list_nth list_e i)
+  in
+  let new_list = Expr.EList values in
+  Cmd.Assignment (list, new_list)
 
 let dummy_access ~ctx type_ =
   if Ctx.is_zst_access ctx type_ then ZST
@@ -27,7 +41,8 @@ type binop_comp =
   | GilBinop of BinOp.t
   | Proc of string
   | App of (Expr.t -> Expr.t -> Expr.t)
-  | Then of (binop_comp * (Expr.t -> Expr.t Cs.with_cmds))
+  | Pre of (Expr.t -> Expr.t -> Expr.t * Expr.t) * binop_comp
+  | Then of binop_comp * (Expr.t -> Expr.t Cs.with_cmds)
   | Unhandled of [ `With_type | `Without_type ]
 
 let compile_binop
@@ -123,8 +138,15 @@ let compile_binop
         | _ -> Unhandled `With_type)
     | Plus -> (
         match (lty, rty) with
-        | ( (Pointer _ | CInteger (I_size_t | I_ssize_t)),
-            (Pointer _ | CInteger (I_size_t | I_ssize_t)) ) ->
+        | Pointer pty, CInteger (I_size_t | I_ssize_t) ->
+            let factor = Ctx.size_of ctx pty in
+            let pre e1 e2 = (e1, Expr.Infix.( * ) e2 (Expr.int factor)) in
+            Pre (pre, Proc add_maybe_ptr)
+        | CInteger (I_size_t | I_ssize_t), Pointer pty ->
+            let factor = Ctx.size_of ctx pty in
+            let pre e1 e2 = (Expr.Infix.( * ) e1 (Expr.int factor), e2) in
+            Pre (pre, Proc add_maybe_ptr)
+        | CInteger (I_size_t | I_ssize_t), CInteger (I_size_t | I_ssize_t) ->
             Proc add_maybe_ptr
         | CInteger I_int, CInteger I_int | CInteger I_char, CInteger I_char ->
             GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
@@ -185,12 +207,33 @@ let compile_binop
         GilBinop ITimes ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
     | OverflowMinus ->
         GilBinop IMinus ||> int_in_bounds ~ty:lty ||> Expr.Infix.not
+    | OverflowResultMinus ->
+        App
+          (fun left right ->
+            let result = Expr.Infix.( - ) left right in
+            let overflowed = Expr.Infix.not (int_in_bounds ~ty:lty result) in
+            Expr.EList [ result; overflowed ])
+    | OverflowResultPlus ->
+        App
+          (fun left right ->
+            let result = Expr.Infix.( + ) left right in
+            let overflowed = Expr.Infix.not (int_in_bounds ~ty:lty result) in
+            Expr.EList [ result; overflowed ])
+    | OverflowResultMult ->
+        App
+          (fun left right ->
+            let result = Expr.Infix.( * ) left right in
+            let overflowed = Expr.Infix.not (int_in_bounds ~ty:lty result) in
+            Expr.EList [ result; overflowed ])
     | _ -> Unhandled `Without_type
   in
   let e1 = Val_repr.as_value ~msg:"Binary operand" e1 in
   let e2 = Val_repr.as_value ~msg:"Binary operand" e2 in
-  let rec compute = function
-    | Then (b, f) -> Cs.bind (compute b) f
+  let rec compute e1 e2 = function
+    | Then (b, f) -> Cs.bind (compute e1 e2 b) f
+    | Pre (f, b) ->
+        let e1, e2 = f e1 e2 in
+        compute e1 e2 b
     | Proc internal_function ->
         let gvar = Ctx.fresh_v ctx in
         let call =
@@ -210,7 +253,7 @@ let compile_binop
         in
         Cs.return ~app:[ cmd ] (Expr.Lit Nono)
   in
-  compute compile_with
+  compute e1 e2 compile_with
 
 let fresh_sv ctx =
   let v = Ctx.fresh_v ctx in
@@ -563,10 +606,19 @@ let rec lvalue_as_access ~ctx ~read (lvalue : GExpr.t) : access Cs.with_body =
                  in case fake-read is necessary *)
               Cs.return (InMemoryScalar { ptr; loaded = None })
             else Cs.return (InMemoryComposit { ptr; type_ = lvalue.type_ })
+        | Direct ovflr when Ctx.is_overflow_result ctx lhs.type_ -> (
+            (* an overflow result, which we represent as a pair *)
+            match GType.Overflow_result.field field with
+            | Result ->
+                Cs.return
+                  (ListMember { list = ovflr; index = 0; total_size = 2 })
+            | Overflowed ->
+                Cs.return
+                  (ListMember { list = ovflr; index = 1; total_size = 2 }))
         | Direct _ | InMemoryScalar _ ->
-            (* This is the case where the structure has one non-zst type that
-               is also representable in store, and can therefore be
-               represented transparently in the store *)
+            (* This the case when the structure has one non-zst type that
+                 is also representable in store, and can therefore be†
+                 represented transparently in the store. *)
             let () =
               (* Bunch of sanity checks *)
               let () =
@@ -756,6 +808,8 @@ and poison ~ctx ~annot (lhs : GExpr.t) =
     | Direct x -> Assignment (x, Lit Undefined)
     | InMemoryScalar { ptr; _ } | InMemoryComposit { ptr; _ } ->
         Memory.poison ~ctx ~dst:ptr (Ctx.size_of ctx type_)
+    | ListMember { list; index; total_size } ->
+        write_list_member ~list ~index ~total_size (Lit Undefined)
     | InMemoryFunction _ | DirectFunction _ ->
         Error.unexpected "poisoning a function"
   in
@@ -818,6 +872,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
         match access with
         | ZST -> by_value (Lit Null)
         | Direct x -> by_value (Expr.PVar x)
+        | ListMember { list; index; _ } ->
+            by_value (Expr.list_nth (PVar list) index)
         | InMemoryScalar { loaded = Some e; _ } -> by_value e
         | InMemoryScalar { loaded = None; ptr } ->
             let* var = Memory.load_scalar ~ctx ptr expr.type_ |> Cs.map_l b in
@@ -873,7 +929,8 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
       | DirectFunction symbol ->
           let+ ptr = Genv.lookup_symbol ~ctx symbol |> Cs.map_l b in
           Val_repr.ByValue ptr
-      | Direct x -> Error.code_error ("address of direct access to " ^ x))
+      | Direct x -> Error.code_error ("address of direct access to " ^ x)
+      | ListMember _ -> Error.code_error "address of list member access")
   | BoolConstant b -> by_value (Lit (Bool b))
   | CBoolConstant b ->
       let z = if b then Z.one else Z.zero in
@@ -1202,7 +1259,7 @@ and compile_statement ~ctx (stmt : Stmt.t) : Val_repr.t Cs.with_body =
       (* Special case: my patched Kani will comment "deinit" if this assignment
          correspond to a deinit that CBMC doesn't handle. *)
       let body =
-        match stmt.stmt_location.comment with
+        match stmt.comment with
         | Some "deinit" -> poison ~ctx ~annot:b lhs
         | _ ->
             let _, body = compile_assign ~ctx ~annot:b ~lhs ~rhs in
