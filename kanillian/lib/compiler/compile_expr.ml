@@ -909,19 +909,7 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
             let open Formula.Infix in
             b (Cmd.Logic (Assume (fnot ptr #== Expr.zero_i)))
           in
-          let assume_not_max =
-            (* GotoC sometimes does arithmetics on zst pointers.
-               That leads to overflows! For that reason, we bound
-               the value to usize::MAX / 2 *)
-            let open Formula.Infix in
-            let max_i =
-              Z.((one lsl Int.sub ctx.machine.pointer_width 1) - one)
-            in
-            b (Cmd.Logic (Assume ptr #< (Expr.int_z max_i)))
-          in
-          Cs.return
-            ~app:[ assume_not_null; assume_not_max ]
-            (Val_repr.ByValue ptr)
+          Cs.return ~app:[ assume_not_null ] (Val_repr.ByValue ptr)
           (* Should probably just return a long, with a nondet value that has the right offset *)
       | InMemoryScalar { ptr; _ }
       | InMemoryComposit { ptr; _ }
