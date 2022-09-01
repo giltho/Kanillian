@@ -1101,3 +1101,4 @@ let get_fixes ?simple_fix:_ _heap _pfs _gamma _err =
   failwith "Not ready for bi-abduction yet"
 
 let apply_fix _heap _pfs _gamma _fix = failwith "Not ready for bi-abdcution"
+let can_fix _ = failwith "Not ready for bi-abduction yet"

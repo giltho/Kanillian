@@ -41,12 +41,12 @@ let pp_err
         (Fmt.list ~sep:(Fmt.any ", ") pp_asrts)
         asrtss
 
-let can_fix (errs : ('a, 'b) t list) : bool =
+let can_fix ~(can_fix_mem : 'a -> bool) (errs : ('a, 'b) t list) : bool =
   let result =
     List.exists
       (fun e ->
         match e with
-        | EMem _ -> true
+        | EMem mem_err -> can_fix_mem mem_err
         | EPure pf -> Reduction.reduce_formula pf <> False
         | EAsrt (_, pf, _) ->
             let result = Reduction.reduce_formula pf <> True in

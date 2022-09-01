@@ -59,6 +59,7 @@ module type S = sig
   val apply_fix : t -> PFS.t -> TypEnv.t -> c_fix_t -> t
   val pp_by_need : Containers.SS.t -> Format.formatter -> t -> unit
   val get_print_info : Containers.SS.t -> t -> Containers.SS.t * Containers.SS.t
+  val can_fix : err_t -> bool
 end
 
 module Lift (MSM : S) : SMemory.S with type t = MSM.t = struct

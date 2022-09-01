@@ -1041,7 +1041,7 @@ struct
                   ~json:
                     [ ("errs", `List (List.map state_err_t_to_yojson errs)) ]
                   "AFail");
-            if not (ExecMode.is_concrete_exec !Config.current_exec_mode) then (
+            if ExecMode.is_verification_exec !Config.current_exec_mode then (
               let expr_params = List.map Val.to_expr v_es in
               let recovery_params =
                 List.concat_map Expr.base_elements expr_params
@@ -1094,7 +1094,7 @@ struct
                         (Fmt.Dump.list State.pp_err)
                         errs);
                   raise (State.Internal_State_Error (errs, state)))
-            else Fmt.failwith "Local Action Failed: %a" Cmd.pp_indexed cmd)
+            else raise (State.Internal_State_Error (errs, state)))
     (* Logic command *)
     | Logic lcmd -> (
         DL.log (fun m -> m "LCmd");

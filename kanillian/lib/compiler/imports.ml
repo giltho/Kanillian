@@ -45,7 +45,13 @@ let all_imports =
     {
       file = "internals.gil";
       arch = any_arch;
-      exec = all_exec;
+      exec = non_bi_exec;
+      genv_config = any_genv_config;
+    };
+    {
+      file = "internals_act.gil";
+      arch = any_arch;
+      exec = bi_exec;
       genv_config = any_genv_config;
     };
     {
@@ -82,18 +88,6 @@ let all_imports =
       file = "internal_stdlib.gil";
       arch = any_arch;
       exec = all_exec;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_verif.gil";
-      arch = any_arch;
-      exec = exec_with_preds;
-      genv_config = any_genv_config;
-    };
-    {
-      file = "stdlib_non_verif.gil";
-      arch = any_arch;
-      exec = concrete_exec;
       genv_config = any_genv_config;
     };
     {

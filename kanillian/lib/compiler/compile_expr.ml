@@ -262,7 +262,6 @@ let fresh_sv ctx =
 
 let rec assume_type ~ctx (type_ : GType.t) (expr : Expr.t) : unit Cs.with_cmds =
   let open Cs.Syntax in
-  (* TODO: I should probably be assuming the *)
   match type_ with
   | CInteger I_bool ->
       (* Special case, the bounds are different *)
@@ -1144,6 +1143,8 @@ and compile_statement ~ctx (stmt : Stmt.t) : Val_repr.t Cs.with_body =
       pre @ [ b (Logic (Assume f)) ] |> void
   (* We can't output nothing, as a label might have to get attached *)
   | Assert { property_class = Some "cover"; _ } -> [ b Skip ] |> void
+  | Assert { property_class = Some "missing_function"; _ } ->
+      [ b (Fail ("unimplemented_function", [])) ] |> void
   | Assert { cond; property_class = _ } ->
       let e, pre = compile_expr_c cond in
       let e = Val_repr.as_value ~msg:"Assert operand" e in

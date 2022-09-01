@@ -744,6 +744,8 @@ module M = struct
           ]
       | FPure f -> [ ([], [ f ], Containers.SS.empty, []) ]
 
+  let can_fix _ = true
+
   (* An error can have multiple fixes *)
   let get_fixes
       ?simple_fix:(sf = true)

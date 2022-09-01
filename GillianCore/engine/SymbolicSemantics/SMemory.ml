@@ -69,6 +69,7 @@ module type S = sig
     (c_fix_t list * Formula.t list * Containers.SS.t * Asrt.t list) list
 
   val apply_fix : t -> PFS.t -> TypEnv.t -> c_fix_t -> t
+  val can_fix : err_t -> bool
 end
 
 module Dummy : S = struct
@@ -108,4 +109,5 @@ module Dummy : S = struct
   let get_failing_constraint _ = failwith "Please implement SMemory"
   let get_fixes ?simple_fix:_ _ _ _ _ = failwith "Please implement SMemory"
   let apply_fix _ _ _ _ = failwith "Please implement SMemory"
+  let can_fix _ = failwith "Please implment SMemory"
 end

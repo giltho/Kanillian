@@ -183,20 +183,38 @@ let compile_function ~ctx (func : Program.Func.t) : (Annot.t, string) Proc.t =
     match func.body with
     | Some b -> b
     | None ->
-        let nondet =
-          GExpr.
+        (* TODO: Hide this in a config *)
+        let fail_on_missing = true in
+        if fail_on_missing then
+          let body =
+            Stmt.Assert
+              {
+                cond =
+                  GExpr.
+                    {
+                      value = BoolConstant false;
+                      type_ = Bool;
+                      location = func.location;
+                    };
+                property_class = Some "missing_function";
+              }
+          in
+          Stmt.{ body; stmt_location = func.location; comment = None }
+        else
+          let nondet =
+            GExpr.
+              {
+                location = func.location;
+                type_ = func.return_type;
+                value = Nondet;
+              }
+          in
+          Stmt.
             {
-              location = func.location;
-              type_ = func.return_type;
-              value = Nondet;
+              stmt_location = func.location;
+              body = Return (Some nondet);
+              comment = None;
             }
-        in
-        Stmt.
-          {
-            stmt_location = func.location;
-            body = Return (Some nondet);
-            comment = None;
-          }
   in
 
   (* Fmt.pr "FUNCTION %s:\n%a@?\n\n" func.symbol Stmt.pp body; *)
@@ -314,7 +332,11 @@ let compile (context : Ctx.t) : (Annot.t, string) Prog.t =
       (fun _ f prog ->
         (* Only compile the function if it isn't hooked *)
         if Option.is_none (Constants.Internal_functions.hook f.symbol) then
-          Prog.add_proc prog (compile_function ~ctx:context f)
+          let compiled = compile_function ~ctx:context f in
+          let with_fun = Prog.add_proc prog compiled in
+          if Ctx.is_act context then
+            Prog.add_bispec with_fun (Logics.bispec ~ctx:context ~compiled f)
+          else with_fun
         else prog)
       program gil_prog
   in

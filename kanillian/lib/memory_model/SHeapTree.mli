@@ -10,7 +10,6 @@ type err =
   | InvalidAlignment of { alignment : int; offset : Expr.t }
   | MissingResource
   | Unhandled of string
-  | RemovingNotOwned
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison

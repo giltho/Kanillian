@@ -883,7 +883,7 @@ let execute_genvremdef heap params =
 
 (* Complete fixes  *)
 
-type c_fix_t
+type c_fix_t = Nop
 
 (* Pretty printing utils *)
 
@@ -1091,9 +1091,18 @@ let get_recovery_vals _ = function
   | GEnvErr (Symbol_not_found s) -> [ Expr.string s ]
   | NonPositiveArraySize e -> [ e ]
 
-let get_failing_constraint _e = failwith "Not ready for bi-abduction yet"
+let get_failing_constraint e =
+  Fmt.failwith "Not ready for bi-abduction yet: get_failing_constraint %a"
+    pp_err e
 
-let get_fixes ?simple_fix:_ _heap _pfs _gamma _err =
-  failwith "Not ready for bi-abduction yet"
+let get_fixes ?simple_fix:_ _heap _pfs _gamma err =
+  Fmt.failwith "unimplemented get_fix for %a" pp_err err
 
-let apply_fix _heap _pfs _gamma _fix = failwith "Not ready for bi-abdcution"
+let apply_fix _heap _pfs _gamma fix =
+  Fmt.failwith "Not ready for bi-abdcution: apply_fix %a" pp_c_fix fix
+
+let can_fix = function
+  | MissingLocResource _
+  | SHeapTreeErr { sheaptree_err = MissingResource; _ }
+  | InvalidLocation _ -> true
+  | _ -> false

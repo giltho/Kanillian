@@ -16,7 +16,6 @@ type err =
   | InvalidAlignment of { alignment : int; offset : Expr.t }
   | MissingResource
   | Unhandled of string
-  | RemovingNotOwned
   | WrongMemVal
   | MemoryNotFreed
   | LoadingPoison
@@ -34,7 +33,6 @@ let pp_err fmt = function
         offset
   | MissingResource -> Fmt.pf fmt "MissingResource"
   | Unhandled e -> Fmt.pf fmt "Unhandled error with message : %s" e
-  | RemovingNotOwned -> Fmt.pf fmt "Removing not owned"
   | WrongMemVal -> Fmt.pf fmt "WrongMemVal"
   | MemoryNotFreed -> Fmt.pf fmt "MemoryNotFreed"
   | LoadingPoison -> Fmt.pf fmt "LoadingPoison"

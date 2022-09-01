@@ -94,8 +94,10 @@ let parse_and_compile_files files =
   let+ goto_prog = parse_symtab_into_goto path in
   let goto_prog = Sanitize.sanitize_program goto_prog in
   let context =
-    Ctx.make ~machine:!Kconfig.machine_model ~prog:goto_prog
-      ~harness:!Kconfig.harness ()
+    Ctx.make
+      ~exec_mode:!Kutils.Config.current_exec_mode
+      ~machine:!Kconfig.machine_model ~prog:goto_prog ~harness:!Kconfig.harness
+      ()
   in
   let gil_prog = Compile.compile context in
   create_compilation_result path goto_prog gil_prog

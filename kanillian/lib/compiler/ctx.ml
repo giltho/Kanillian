@@ -103,6 +103,7 @@ module Local = struct
 end
 
 type t = {
+  exec_mode : Kutils.ExecMode.t;
   machine : Machine_model.t;
   prog : Program.t;
   fresh_v : unit -> string;
@@ -114,8 +115,9 @@ type t = {
   break_lab : string option;
 }
 
-let make ~machine ~prog ~harness () =
+let make ~exec_mode ~machine ~prog ~harness () =
   {
+    exec_mode;
     allocated_temps = Hashset.empty ~size:32 ();
     locals = Hashtbl.create 0;
     in_memory = Hashset.empty ~size:0 ();
@@ -224,3 +226,8 @@ let ptr_64 ctx =
 
 let one_representable_field ctx ty =
   one_representable_field ~prog:ctx.prog ~machine:ctx.machine ty
+
+let is_act ctx =
+  match ctx.exec_mode with
+  | BiAbduction -> true
+  | _ -> false

@@ -1,3 +1,5 @@
+#internal
+
 proc i__unop_object_size(ptr) {
         goto [ptr = 0i] nul nnul;
   nul:  ret := 0i;

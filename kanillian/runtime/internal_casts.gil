@@ -1,3 +1,5 @@
+#internal
+
 proc i__cast_unsign_int_same_size(v1, two_power_size) {
         (* If we're casting iK to uK,
           then two_power_size is should be 2^K *)
