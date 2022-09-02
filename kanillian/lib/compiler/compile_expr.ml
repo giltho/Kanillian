@@ -1032,13 +1032,22 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
               | _ -> Error.code_error "Wrong field mapping"
             and on_field a t e =
               match (a, t, e) with
+              (* If we reached the leaf, or if we reached a symbol, we can stop *)
+              | ( _ :: _,
+                  (StructTag _ | Struct _),
+                  (GExpr.{ value = Symbol _; _ } as e) )
               | [], _, e -> e
               | ( _ :: _,
                   (StructTag _ | Struct _),
                   GExpr.{ value = GExpr.Struct elems; _ } ) ->
                   let fields = Ctx.resolve_struct_components ctx t in
                   select_field a fields elems
-              | _ -> Error.code_error "Wrong field mapping"
+              | _ ->
+                  Error.code_error
+                    Fmt.(
+                      str
+                        "Wrong field mapping:\naccesses: %a\ntype: %a\nelem: %a"
+                        (Dump.list string) a GType.pp t GExpr.pp e)
             in
             select_field accesses fields elems
           in
