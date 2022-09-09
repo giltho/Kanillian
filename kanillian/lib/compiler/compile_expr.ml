@@ -179,15 +179,15 @@ let compile_binop
         | CInteger I_ssize_t, CInteger I_ssize_t ->
             GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
         | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
-          when widtha == widthb ->
-            GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
+          when widtha == widthb -> GilBinop IMinus ||> modulo_max ~ty:lty
         | Signedbv { width = widtha }, Signedbv { width = widthb }
           when widtha == widthb ->
             GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Mult -> (
         match lty with
-        | CInteger _ | Unsignedbv _ | Signedbv _ ->
+        | Unsignedbv _ -> GilBinop ITimes ||> modulo_max ~ty:lty
+        | CInteger _ | Signedbv _ ->
             GilBinop ITimes |||> assert_int_in_bounds ~ty:lty
         | _ -> Unhandled `With_type)
     | Div -> (
