@@ -171,7 +171,11 @@ let is_overflow_result ctx ty = is_overflow_result ~prog:ctx.prog ty
 
 let is_zst_access ctx (ty : Type.t) =
   match ty with
-  | Bool | Code _ -> false
+  | Bool | Code _ | IncompleteStruct _ -> false
+  | StructTag t
+    when match tag_lookup ctx t with
+         | IncompleteStruct _ -> true
+         | _ -> false -> false
   | _ -> (not (is_overflow_result ctx ty)) && size_of ctx ty == 0
 
 let representable_in_store ctx ty =

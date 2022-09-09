@@ -104,7 +104,11 @@ let fold_variables f prog acc = Hashtbl.fold f prog.vars acc
 
 let is_zst ~prog ~machine (ty : Type.t) : bool =
   match ty with
-  | Bool | Code _ | Constructor -> false
+  | Bool | Code _ | Constructor | IncompleteStruct _ -> false
+  | StructTag t
+    when match Hashtbl.find prog.types t with
+         | IncompleteStruct _ -> true
+         | _ -> false -> false
   | _ ->
       let tag_lookup = Hashtbl.find prog.types in
       (not (Type.Overflow_result.is_overflow_result ~tag_lookup ty))

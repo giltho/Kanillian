@@ -190,6 +190,7 @@ end
 let rec bit_size_of ~(machine : Machine_model.t) ~(tag_lookup : string -> t) t =
   let dc_bit_size = bit_size_of_datatype_component ~machine ~tag_lookup in
   let bit_size_of = bit_size_of ~tag_lookup ~machine in
+  (* Fmt.pr "bit_size_of: %a\n@?" pp t; *)
   match t with
   | Array (ty, sz) | Vector { type_ = ty; size = sz } -> sz * bit_size_of ty
   | CInteger I_bool -> machine.bool_width
