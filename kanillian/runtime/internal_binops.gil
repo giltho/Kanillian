@@ -29,14 +29,14 @@ proc i__binop_overflow_plus_maybe_ptr(v1, v2) {
   llro: goto [ typeOf(l-nth(v2, 0i)) = Obj ] llrp unde;
   llrp: offset := v1 i+ l-nth(v2, 1i);
         gt_zero := 0i i<= offset;
-        valid := "i__valid_pointer"(l-nth(v2, 0i), offset);
+        valid := "i__weak_valid_ptr"(l-nth(v2, 0i), offset);
         ret := not (gt_zero and valid);
         return;
   loth: goto [ typeOf(l-nth(v1, 0i)) = Obj ] lptr unde;
   lptr: goto [ (typeOf v2) = Int ] lprl unde;
   lprl: offset := v2 i+ l-nth(v1, 1i);
         gt_zero := 0i i<= offset;
-        valid := "i__valid_pointer"(l-nth(v1, 0i), offset);
+        valid := "i__weak_valid_ptr"(l-nth(v1, 0i), offset);
         ret := not (gt_zero and valid);
         return;
   unde: fail[Arithmetics]("Invalid values for addition", v1, v2);
