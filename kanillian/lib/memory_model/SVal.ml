@@ -437,7 +437,6 @@ module SVArray = struct
                 List.rev_append sval_bytes acc)
               (Delayed.return []) concrete_array
           in
-          let raw_bytes_se = List.rev raw_bytes_se in
           SVal.of_raw_bytes_se ~chunk raw_bytes_se
     | Float { bit_width = size_from }, Float { bit_width = size_to } ->
         if size_from > size_to then
