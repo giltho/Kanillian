@@ -164,7 +164,7 @@ module SVal = struct
     let open Delayed.Syntax in
     if not (Chunk.is_int chunk) then
       Fmt.failwith "Unhandled: byte_array of float value";
-    let signed, size = Chunk.int_chunk_to_signed_and_size chunk in
+    let signed, byte_size = Chunk.int_chunk_to_signed_and_size chunk in
     let bytes =
       match !Kconfig.endianness with
       | `LittleEndian -> bytes
@@ -180,7 +180,8 @@ module SVal = struct
         (Expr.zero_i, Z.one) bytes
     in
     let+ expr =
-      if signed then sign_int ~bit_size:size expr else Delayed.return expr
+      if signed then sign_int ~bit_size:(byte_size * 8) expr
+      else Delayed.return expr
     in
     make ~chunk ~value:expr
 end

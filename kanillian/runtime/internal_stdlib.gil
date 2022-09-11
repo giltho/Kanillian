@@ -37,9 +37,11 @@ proc i__memcmp(ptr1, ptr2, sz) {
            goto [sz i<= 0i] zer cmp;
       zer: ret := 0i;
            return;
-      cmp: left := [mem_getArray](l-nth(ptr1, 0i), l-nth(ptr1, 1i), sz, "u8");
-           right := [mem_getArray](l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz, "u8");
-           ret := "i__value_of_bool"(left = right);
+      cmp: leftl := [mem_getArray](l-nth(ptr1, 0i), l-nth(ptr1, 1i), sz, "u8");
+           rightl := [mem_getArray](l-nth(ptr2, 0i), l-nth(ptr2, 1i), sz, "u8");
+           left := l-nth(leftl, 4i);
+           right := l-nth(rightl, 4i);
+           ret := "i__value_of_bool"(not (left = right));
            return
 };
 
