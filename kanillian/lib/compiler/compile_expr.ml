@@ -921,7 +921,14 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
             let open Formula.Infix in
             b (Cmd.Logic (Assume (fnot ptr #== Expr.zero_i)))
           in
-          Cs.return ~app:[ assume_not_null ] (Val_repr.ByValue ptr)
+          let assume_align_8 =
+            let open Formula.Infix in
+            let mod_8 = Expr.BinOp (ptr, IMod, Expr.int 8) in
+            b (Cmd.Logic (Assume mod_8 #== Expr.zero_i))
+          in
+          Cs.return
+            ~app:[ assume_not_null; assume_align_8 ]
+            (Val_repr.ByValue ptr)
           (* Should probably just return a long, with a nondet value that has the right offset *)
       | InMemoryScalar { ptr; _ }
       | InMemoryComposit { ptr; _ }
