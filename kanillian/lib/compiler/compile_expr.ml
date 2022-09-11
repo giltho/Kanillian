@@ -86,19 +86,25 @@ let compile_binop
     let cmd = Cmd.Logic (LCmd.Assert formula) in
     Cs.return ~app:[ cmd ] e
   in
-  let modulo_max ~ty e =
+  let high ~ty =
     let error () =
-      Error.code_error (Fmt.str "modulo_max for non-unsigned: %a" GType.pp ty)
+      Error.code_error (Fmt.str "high for non-int: %a" GType.pp ty)
     in
-    let high =
-      match Memory.chunk_for_type ~ctx ty with
-      | Some (F32 | F64) | None -> error ()
-      | Some c -> (
-          match Chunk.bounds c with
-          | Some (zero, high) when Z.equal zero Z.zero -> Z.succ high
-          | _ -> error ())
-    in
+    match Memory.chunk_for_type ~ctx ty with
+    | Some (F32 | F64) | None -> error ()
+    | Some c -> (
+        match Chunk.bounds c with
+        | Some (zero, high) when Z.equal zero Z.zero -> Z.succ high
+        | _ -> error ())
+  in
+  let modulo_max ~ty e =
+    let high = high ~ty in
     Expr.BinOp (e, IMod, Expr.int_z high)
+  in
+  let plus_max_modulo_max ~ty e =
+    let high = Expr.int_z (high ~ty) in
+    let plus_max = Expr.Infix.( + ) e high in
+    Expr.imod plus_max high
   in
   let compile_with =
     (* let open Cgil_lib.CConstants.BinOp_Functions in *)
@@ -177,9 +183,10 @@ let compile_binop
         | CInteger I_int, CInteger I_int
         | CInteger I_char, CInteger I_char
         | CInteger I_ssize_t, CInteger I_ssize_t ->
-            GilBinop IPlus |||> assert_int_in_bounds ~ty:lty
+            GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
         | Unsignedbv { width = widtha }, Unsignedbv { width = widthb }
-          when widtha == widthb -> GilBinop IMinus ||> modulo_max ~ty:lty
+          when widtha == widthb ->
+            GilBinop IMinus ||> plus_max_modulo_max ~ty:lty
         | Signedbv { width = widtha }, Signedbv { width = widthb }
           when widtha == widthb ->
             GilBinop IMinus |||> assert_int_in_bounds ~ty:lty
