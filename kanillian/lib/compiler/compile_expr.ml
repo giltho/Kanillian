@@ -971,6 +971,14 @@ and compile_expr ~(ctx : Ctx.t) (expr : GExpr.t) : Val_repr.t Cs.with_body =
             Memory.object_size ~ctx ~ptr_ty:e.type_ comp_e |> Cs.map_l b
           in
           by_value size
+      | UnaryMinus -> (
+          match e.type_ with
+          | CInteger _ | Unsignedbv _ | Signedbv _ ->
+              by_value (Expr.UnOp (IUnaryMinus, comp_e))
+          | Float | Double -> by_value (Expr.UnOp (FUnaryMinus, comp_e))
+          | _ ->
+              let cmd = b (Helpers.assert_unhandled ~feature:(UnOp op) []) in
+              Cs.return ~app:[ cmd ] (Val_repr.ByValue (Lit Nono)))
       | op ->
           let cmd = b (Helpers.assert_unhandled ~feature:(UnOp op) []) in
           Cs.return ~app:[ cmd ] (Val_repr.ByValue (Lit Nono)))
